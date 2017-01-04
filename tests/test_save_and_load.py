@@ -94,3 +94,12 @@ class TestSave(BaseTestCase):
         user_in_db = self.loop.run_until_complete(UserComposite.load(self.db, identifier=('100', 'Test name')))
         self.assertEqual(type(user_in_db), UserComposite)
         self.assertEqual(user_in_db.id, 'updated id')
+
+    def test_get_by_using_pk(self):
+        user_id = str(uuid1())
+        user = User(id=user_id, name='Test name', age=100, status='active')
+        ret = self.loop.run_until_complete(user.save(self.db))
+        self.assertTrue(ret)
+        asyncio.set_event_loop(self.loop)
+        users_in_db = self.loop.run_until_complete(User.get_by(self.db, id=user_id))
+        self.assertTrue(len(users_in_db), 1)
