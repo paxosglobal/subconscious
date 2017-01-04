@@ -1,10 +1,13 @@
 import inspect
 import asyncio
+import logging
 from .columns import Column
 from .query import Query
 
 VALUE_ID_SEPARATOR = '\x00'
 MODEL_NAME_ID_SEPARATOR = ':'
+
+logger = logging.getLogger(__name__)
 
 
 class _AllIter:
@@ -134,6 +137,7 @@ class Model(metaclass=ModelMeta):
 
     async def save(self, db):
         await self.save_index(db)
+        logger.debug('Saving object with key {}'.format(self.redis_key(self.identifier())))
         return await db.hmset_dict(self.redis_key(self.identifier()), self.as_dict())
 
     @classmethod
@@ -177,6 +181,7 @@ class Model(metaclass=ModelMeta):
         if isinstance(identifier, tuple):
             identifier = ":".join(identifier)
         key = cls.redis_key(identifier)
+        logger.debug('Loading object with key {}'.format(key))
         if await db.exists(key):
             data = await db.hgetall(key)
             kwargs = {}
@@ -193,6 +198,7 @@ class Model(metaclass=ModelMeta):
             [setattr(stored_entity, x, None) for x in cls._column_names if x not in fields_stored]
             return stored_entity
         else:
+            logger.debug('Object with key {} not existing'.format(key))
             return None
 
     @classmethod
