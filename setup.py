@@ -8,7 +8,7 @@ setup(
               ],
     url='',
     license='',
-    author='gipsygopinathan',
+    author='paxosdev',
     author_email='',
     description='',
     install_requires=['aioredis']
