@@ -1,9 +1,9 @@
 from distutils.core import setup
-import redismodel
+import subconscious
 
 setup(
     name='subconscious',
-    version=redismodel.__version__,
+    version=subconscious.__version__,
     packages=['subconscious',
               ],
     url='',
