@@ -1,0 +1,9 @@
+*.ve*
+.idea
+*.pyc
+.coverage
+nosetest_results_stderr.txt
+nosetest_results_stdout.txt
+report.txt
+
+
