@@ -4,4 +4,5 @@ in-memory database
 
 *Install*
 
-pip install https://github.com/paxos-bankchain/subconscious.git
+pip install git+https://github.com/paxos-bankchain/subconscious.git
+
