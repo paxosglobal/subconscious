@@ -48,8 +48,10 @@ class ModelMeta(type):
                     assert cls._pk is None, "Only one primary key is allowed"
                     cls._pk = column
                     cls._identifier_column_names.add(name)
+                    cls._indexed_column_names.add(name)
                 if column.composite is True:
                     cls._identifier_column_names.add(name)
+                    cls._indexed_column_names.add(name)
 
 
 class Model(metaclass=ModelMeta):
