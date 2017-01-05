@@ -1,3 +1,2 @@
-arrow
 aioredis
 coverage

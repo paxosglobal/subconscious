@@ -1,4 +1,4 @@
-from subconscious.model import TimeStampedModel, Column
+from subconscious.model import RedisModel, Column
 from uuid import uuid1
 from .base import BaseTestCase
 import enum
@@ -8,7 +8,7 @@ class StatusEnum(enum.Enum):
     ACTIVE = 'active'
 
 
-class User(TimeStampedModel):
+class User(RedisModel):
     id = Column(primary_key=True)
     name = Column(index=True)
     age = Column(index=True, type=int)

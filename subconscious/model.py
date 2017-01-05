@@ -5,10 +5,6 @@ import logging
 
 from enum import EnumMeta
 from itertools import product
-from .time import utcnow_with_tz
-
-# local modules
-# from shared.time import utcnow_with_tz
 
 
 logger = logging.getLogger(__name__)
@@ -321,26 +317,3 @@ class RedisModel(object, metaclass=ModelMeta):
                 identifiers.extend(await db.smembers(index_redis_key))
         futures = [cls.load(db, identifier=p.decode()) for p in sorted(identifiers)]
         return await asyncio.gather(*futures, loop=db.connection._loop)
-
-
-class TimeStampedModel(RedisModel):
-    """Model that automatically adds created_at and updated_at columns for you.
-    """
-    # Make created_at and updated_at a proper column
-    created_at = Column(type=str, sort=True)
-    updated_at = Column(type=str, sort=True)
-
-    # force only keyword arguments
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        if kwargs.get('updated_at'):
-            self.updated_at = kwargs.pop('updated_at')
-        if kwargs.get('created_at'):
-            self.created_at = kwargs.pop('created_at')
-
-    async def save(self, db):
-        now = utcnow_with_tz().isoformat()
-        self.updated_at = now
-        if not await db.exists(self.redis_key()):
-            self.created_at = now
-        return await super().save(db)
