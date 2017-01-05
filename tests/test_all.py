@@ -1,5 +1,4 @@
-from subconscious.columns import Column
-from subconscious.model import Model
+from subconscious.model import TimeStampedModel, Column
 from uuid import uuid1
 from .base import BaseTestCase
 import enum
@@ -9,13 +8,12 @@ class StatusEnum(enum.Enum):
     ACTIVE = 'active'
 
 
-class User(Model):
-    id = Column(pk=True)
+class User(TimeStampedModel):
+    id = Column(primary_key=True)
     name = Column(index=True)
-    age = Column(index=True, col_type=int)
-    locale = Column(index=True, col_type=int, required=False)
-    status = Column(col_type=str, enum=StatusEnum)
-    _custom_indexes = {('name', 'age'), ('age', 'name'), ('name',)}
+    age = Column(index=True, type=int)
+    locale = Column(index=True, type=int, required=False)
+    status = Column(type=str, enum=StatusEnum)
 
 
 class TestAll(BaseTestCase):
@@ -32,7 +30,7 @@ class TestAll(BaseTestCase):
         self.assertTrue(ret)
 
         async def _test_all():
-            async for x in await User.all(db=self.db):
+            for x in await User.all(db=self.db):
                 self.assertEqual(type(x), User)
                 self.assertTrue(x.name in ('Test name', 'Test name 2'))
                 self.assertTrue(x.age in (100, 53))

@@ -1,77 +1,97 @@
-import inspect
+# python modules
 import asyncio
+import inspect
 import logging
-from .columns import Column
-from .query import Query
 
-VALUE_ID_SEPARATOR = '\x00'
-MODEL_NAME_ID_SEPARATOR = ':'
+from enum import EnumMeta
+from itertools import product
+from .time import utcnow_with_tz
+
+# local modules
+# from shared.time import utcnow_with_tz
+
 
 logger = logging.getLogger(__name__)
 
 
-class _AllIter:
-    def __init__(self, db, model, match, count=100):
-        self.match = match
-        self.count = count
-        self.db = db
-        self.model = model
-        self.iterable = self.db.iscan(match=self.match, count=self.count)
+class Column:
+    """Defined fields (columns) for a given RedisModel.
+    """
 
-    async def __aiter__(self):
-        return self
+    def __init__(self, type=str, primary_key=None, composite_key=None, index=None,
+                 required=None, enum=None, sort=None):
+        """primary_key can exist in only a single column.
+        composite_key can exist in multiple columns.
+        You can't have both a primary_key and composite_key in the same model.
+        index is whether you want this column indexed or not for faster retrieval.
+        """
+        # TODO: support for other field types (datetime, etc)
 
-    async def __anext__(self):
-        while True:
-            key = await self.iterable.__anext__()
-            return await self.model.load(self.db, key.decode().partition(MODEL_NAME_ID_SEPARATOR)[2])
+        self.field_type = type
+        assert self.field_type in (str, int)
+        self.primary = primary_key is True
+        self.composite = composite_key is True
+        self.sorted = sort is True
+        assert not (self.primary and self.composite)
+        self.indexed = (index is True) or self.composite
+        if required is False:
+            self.required = required
+        else:
+            self.required = (required is True) or self.primary or self.composite
+
+        self.enum = enum
+        if enum:
+            assert isinstance(enum, EnumMeta), enum
+            self.enum_choices = set([x.value for x in enum])
+        else:
+            self.enum_choices = set()
+
+    def __repr__(self):
+        return "<{}: {}>".format(self.__class__.__name__, self.name)
 
 
 class ModelMeta(type):
+
     def __init__(cls, what, bases=None, attributes=None):
-        super().__init__(what, bases, attributes)
-        if what not in ('Model',):
-            cls._columns = set()
-            cls._column_names = set()
-            cls._indexed_columns = set()
-            cls._indexed_column_names = set()
-            cls._identifier_column_names = set()
-            cls._pk = None
+        super(ModelMeta, cls).__init__(what, bases, attributes)
+        if cls.__name__ not in ('RedisModel', 'TimeStampedModel'):
+            columns = []
+            num_primary, num_composite = 0, 0
+            cls._pk_name = None
+            # grab all Columns from the model
             for name, column in inspect.getmembers(cls, lambda col: type(col) == Column):
                 column.name = name
-                cls._columns.add(column)
-                cls._column_names.add(name)
-                if column.index is True:
-                    cls._indexed_columns.add(column)
-                    cls._indexed_column_names.add(name)
-                if column.pk is True:
-                    assert cls._pk is None, "Only one primary key is allowed"
-                    cls._pk = column
-                    cls._identifier_column_names.add(name)
-                    cls._indexed_columns.add(column)
-                    cls._indexed_column_names.add(name)
-                if column.composite is True:
-                    cls._identifier_column_names.add(name)
-                    cls._indexed_columns.add(column)
-                    cls._indexed_column_names.add(name)
+                columns.append(column)
+                if column.primary:
+                    num_primary += 1
+                    cls._pk_name = column.name
+                if column.composite:
+                    num_composite += 1
+            assert (num_primary == 0 and num_composite > 1) or (num_primary == 1 and num_composite == 0), \
+                "{}: You need exactly 1 primary_key column or more than 1 composite_key columns".format(cls.__name__)
+
+            cls._columns = tuple(sorted(columns, key=lambda c: c.name))
+            cls._indexed_columns = tuple(sorted([col for col in cls._columns if col.indexed], key=lambda c: c.name))
+            cls._sortable_columns = tuple(sorted([col for col in cls._columns if col.sorted], key=lambda c: c.name))
+            cls._identifier_columns = tuple(
+                sorted([col for col in cls._columns if col.primary or col.composite],
+                       key=lambda c: c.name))
+            cls._queryable_colnames_set = set([col.name for col in cls._indexed_columns + cls._identifier_columns])
+            cls._sortable_column_names = tuple([x.name for x in cls._sortable_columns])
 
 
-class Model(metaclass=ModelMeta):
-    _custom_indexes = {}
+class RedisModel(object, metaclass=ModelMeta):
 
-    def __init__(self, **kwargs):
-        assert (self._pk is None and len(self._identifier_column_names) > 1) \
-            or (self._pk and len(self._identifier_column_names) == 1), \
-            "{}: You need exactly 1 primary_key column or more than 1 composite_key columns".format(
-                self.__class__.__name__)
+    # force only keyword arguments
+    def __init__(self, allow_unknown_cols=False, **kwargs):
         for column in self._columns:
             if column.name in kwargs:
                 value = kwargs.pop(column.name)
-                assert type(value) == column.col_type, "Column `{}` in {} has value {}, should be of type {}".format(
+                assert type(value) == column.field_type, "Column `{}` in {} has value {}, should be of type {}".format(
                     column.name,
                     self.__class__.__name__,
                     value,
-                    column.col_type,
+                    column.field_type,
                 )
                 if column.enum_choices:
                     assert value in column.enum_choices, "Column `{}` in {} has value {}, should be in set {}".format(
@@ -86,125 +106,241 @@ class Model(metaclass=ModelMeta):
                     column.name,
                     self.__class__.__name__,
                 )
-                setattr(self, column.name, None)
 
-    @classmethod
-    def query(cls, db):
-        return Query(cls, db)
-
-    def as_dict(self):
-        _dict = {}
-        for name in self._column_names:
-            if getattr(self, name):
-                _dict[name] = getattr(self, name)
-        return _dict
-
-    async def save_index(self, db):
-        for column in self._indexed_columns:
-            index_key = 'index:{key_prefix}:{column_name}'.format(
-                key_prefix=self.key_prefix(),
-                column_name=column.name,
-
+        if allow_unknown_cols is False:
+            # Require that every kwarg supplied matches an expected column
+            # TODO: handle TimeStampedModel cols better
+            known_cols_set = set([column.name for column in self._columns] + ['updated_at', 'created_at'])
+            supplied_cols_set = set([x for x in kwargs])
+            unknown_cols_set = supplied_cols_set - known_cols_set
+            assert unknown_cols_set == set(), 'Unknown column(s): {} in `{}`'.format(
+                unknown_cols_set,
+                self.__class__.__name__,
             )
-            index_value = '{value}{separator}{identity}'.format(
-                value=getattr(self, column.name),
-                identity=self.identifier(),
-                separator=VALUE_ID_SEPARATOR
-            )
-            await db.zadd(index_key, 0, index_value)
-        for index in self._custom_indexes:
-            index_key = ':'.join(['custom', self.key_prefix(), ] + list(index))
-            sort_str = '-'.join([str(getattr(self, x)) for x in index])
-            for name in self._indexed_column_names:
-                value = getattr(self, name)
-                index_value = '{name}{separator}{value}{separator}{sort_str}{value_id_separator}{identifier}'.format(
-                    name=name,
-                    value=value,
-                    sort_str=sort_str,
-                    identifier=self.identifier(),
-                    value_id_separator=VALUE_ID_SEPARATOR,
-                    separator=MODEL_NAME_ID_SEPARATOR,
-                )
-                await db.zadd(index_key, 0, index_value)
 
     @classmethod
     def key_prefix(cls):
+        """Prefix that we use for Redis storage, used for all keys related
+        to this object. Default to class name.
+        """
         return cls.__name__
 
+    @classmethod
+    def make_key(cls, identifier):
+        """Convenience method for computing the Redis object instance key
+        from the identifier
+        """
+        return "{}:{}".format(cls.key_prefix(), identifier)
+
+    def has_real_data(self, column_name):
+        return not isinstance(getattr(self, column_name), Column)
+
     def identifier(self):
-        identifiers = [str(getattr(self, name)) for name in sorted(self._identifier_column_names)]
+        identifiers = [str(getattr(self, column.name)) for column in self._identifier_columns]
         return ':'.join(identifiers)
 
+    def redis_key(self):
+        """Key used for storage of object instance in Redis.
+        """
+        return "{}:{}".format(self.key_prefix(), self.identifier())
+
+    def as_dict(self):
+        """Dict version of this object
+        """
+        # WARNING: we have to send a copy, otherwise changing the dict
+        # changes the object!
+        # FIXME: this returns no keys for keys whose value is None!
+        return self.__dict__.copy()
+
+    def __repr__(self):
+        return "<{}>".format(self.redis_key())
+
+    def get_index_redis_key(self):
+        key_components = ['index', self.key_prefix()]
+        for column in self._indexed_columns:
+            key_components.append(str(getattr(self, column.name)))
+        return ":".join(key_components)
+
     @classmethod
-    def redis_key(cls, identifier):
-        return '{}{}{}'.format(cls.key_prefix(), MODEL_NAME_ID_SEPARATOR, identifier)
+    def get_sort_column_key(cls, column_name):
+        return 'sort:{}:{}'.format(cls.key_prefix(), column_name)
+
+    async def save_index(self, db, stale_object=None):
+        current_index_redis_key = self.get_index_redis_key()
+        for sort_column in self._sortable_column_names:
+            if self.has_real_data(sort_column):
+                # Index it by adding to a sorted set with 0 score. It will be lexically sorted by redis
+                await db.zadd(
+                    self.get_sort_column_key(sort_column),
+                    0,
+                    '{}:{}'.format(getattr(self, sort_column), self.identifier())
+                )
+
+        await db.sadd(current_index_redis_key, self.identifier())
+        if stale_object:
+            stale_index_redis_key = stale_object.get_index_redis_key()
+            # update the index only if they're different
+            if stale_index_redis_key != current_index_redis_key:
+                await db.srem(stale_index_redis_key, self.identifier())
 
     async def save(self, db):
-        await self.save_index(db)
-        logger.debug('Saving object with key {}'.format(self.redis_key(self.identifier())))
-        return await db.hmset_dict(self.redis_key(self.identifier()), self.as_dict())
-
-    @classmethod
-    async def get_by(cls, db, **kwargs):
-        """Query by attributes. Ordering is not supported
-        Example:
-            User.get_by(db, age=[32, 54])
-            User.get_by(db, age=23, name="guido")
-
+        """Save the object to Redis.
         """
-        result_set = set()
-        first_iteration = True
-        for k, v in kwargs.items():
-            assert k in cls._indexed_column_names
-            if isinstance(v, (list, tuple)):
-                values = [str(x) for x in v]
-            else:
-                values = (str(v),)
-            temp_set = set()
-            for value in values:
-                index_key = 'index:{key_prefix}:{column_name}'.format(
-                    key_prefix=cls.key_prefix(),
-                    column_name=k)
-                temp_set = temp_set.union({x.decode().partition(VALUE_ID_SEPARATOR)[2] for x in await db.zrangebylex(
-                    index_key,
-                    min='{}{}'.format(value, VALUE_ID_SEPARATOR).encode(),
-                    max='{}{}\xff'.format(value, VALUE_ID_SEPARATOR).encode())})
-            if first_iteration:
-                result_set = result_set.union(temp_set)
-                first_iteration = False
-            else:
-                result_set = result_set.intersection(temp_set)
-        futures = []
-        for key in result_set:
-            futures.append(cls.load(db, key))
+        # we have to delete the old index key
+        stale_object = await self.__class__.load(db, identifier=self.identifier())
+        success = await db.hmset_dict(self.redis_key(), self.__dict__.copy())
+        await self.save_index(db, stale_object=stale_object)
+        return success
 
-        return await asyncio.gather(*futures)
+    async def exists(self, db):
+        return await db.exists(self.redis_key())
 
     @classmethod
-    async def load(cls, db, identifier):
-        if isinstance(identifier, tuple):
-            identifier = ":".join(identifier)
-        key = cls.redis_key(identifier)
-        logger.debug('Loading object with key {}'.format(key))
-        if await db.exists(key):
-            data = await db.hgetall(key)
+    async def load(cls, db, identifier=None, redis_key=None):
+        """Load the object from redis. Use the identifier (colon-separated
+        composite keys or the primary key) or the redis_key.
+        """
+        assert identifier or redis_key
+        if redis_key is None:
+            redis_key = cls.make_key(identifier)
+        if await db.exists(redis_key):
+            data = await db.hgetall(redis_key)
             kwargs = {}
-            fields_stored = []
             for key_bin, value_bin in data.items():
                 key, value = key_bin.decode(), value_bin.decode()
                 column = getattr(cls, key, False)
-                if not column or (column.col_type == str):
+                if not column or (column.field_type == str):
                     kwargs[key] = value
                 else:
-                    kwargs[key] = column.col_type(value)
-                fields_stored.append(key)
-            stored_entity = cls(**kwargs)
-            [setattr(stored_entity, x, None) for x in cls._column_names if x not in fields_stored]
-            return stored_entity
+                    kwargs[key] = column.field_type(value)
+            return cls(**kwargs)
         else:
-            logger.debug('Object with key {} not existing'.format(key))
+            logger.info("No Redis key found: {}".format(redis_key))
             return None
 
     @classmethod
-    async def all(cls, db):
-        return _AllIter(db, cls, '{}{}*'.format(cls.key_prefix(), MODEL_NAME_ID_SEPARATOR), count=1000)
+    async def all_keys(cls, db):
+        """Return all redis keys that are in the database for this class.
+        """
+        return await db.keys("{}:*".format(cls.key_prefix()))
+
+    @classmethod
+    async def all(cls, db, order_by=None):
+        """Return all object instances of this class that's in the db.
+        """
+        if order_by:
+            if order_by[0] in ['+', '-']:
+                direction, order_by = order_by[0], order_by[1:]
+            else:
+                direction = '+'
+            assert order_by in cls._sortable_column_names
+            if direction == '+':
+                range_func = db.zrange
+            else:
+                range_func = db.zrevrange
+            all_keys = []
+            for index_entry in await range_func(cls.get_sort_column_key(order_by).encode(), 0, -1):
+                all_keys.append('{}:{}'.format(cls.key_prefix(), index_entry.decode().split(':')[-1]))
+        else:
+            all_keys = await cls.all_keys(db)
+        if not all_keys:
+            return []
+        futures = []
+        for redis_key in all_keys:
+            futures.append(cls.load(db, redis_key=redis_key))
+        return [x for x in await asyncio.gather(*futures, loop=db.connection._loop)
+                if x is not None]
+
+    @classmethod
+    async def filter_by(cls, db, **kwargs):
+        """Return all object instances of this class that have
+        values at columns determined by kwargs
+        """
+
+        # Assert that the lookup keys are part of indexed, pk or composite keys
+        missing_cols_set = set(kwargs.keys()) - cls._queryable_colnames_set
+        assert not missing_cols_set, '{missing_cols_set} not in {queryable_cols}'.format(
+            missing_cols_set=missing_cols_set,
+            queryable_cols=cls._queryable_colnames_set,
+        )
+
+        # Check if PK is in the lookup field. If yes then do a load and return.
+        if cls._pk_name in kwargs:
+            entity = await cls.load(db, identifier=kwargs.get(cls._pk_name))
+            # Now match with the other fields supplied for lookup
+            for key, val in kwargs.items():
+                if key == cls._pk_name:
+                    continue
+                if type(val) == list:
+                    if getattr(entity, key) not in val:
+                        return []
+                elif getattr(entity, key) != val:
+                    return []
+            return [entity]
+
+        # Make list of unique entries. We need a list to do index ops below
+        in_clauses = list({x for x in kwargs.keys() if type(kwargs[x]) == list})
+        field_combinations = product(*[kwargs[x] for x in in_clauses])
+        index_keys_collection = []
+        for field_combo in field_combinations:
+            kwargs_copy = kwargs.copy()
+            # pop out in-clause fields first. They will be used to construct individual index lookup keys below.
+            [kwargs_copy.pop(x) for x in in_clauses]
+            # re-set in clause values one at a time.
+            for i, field in enumerate(field_combo):
+                kwargs_copy[in_clauses[i]] = field
+            key_components = ["index", cls.key_prefix()]
+            for column in cls._indexed_columns:
+                if column.name in kwargs_copy:
+                    if kwargs_copy[column.name] is None:
+                        # This is the way we are constructing index key in save()
+                        # when the indexed field value is None
+                        key_components.append(str(column))
+                    else:
+                        key_components.append(str(kwargs_copy[column.name]))  # Stringify field value
+                else:
+                    key_components.append('*')
+            index_keys_collection.append(":".join(key_components))
+
+        if not index_keys_collection:
+            key_components = ["index", cls.key_prefix()]
+            for column in cls._indexed_columns:
+                if column.name in kwargs:
+                    if kwargs[column.name] is None:
+                        # This is the way we are constructing index key in save() when the indexed field value is None
+                        key_components.append(str(column))
+                    else:
+                        key_components.append(str(kwargs[column.name]))  # Stringify field value
+                else:
+                    key_components.append('*')
+            index_keys_collection.append(":".join(key_components))
+
+        identifiers = []
+        for all_index_keys in index_keys_collection:
+            for index_redis_key in await db.keys(all_index_keys):
+                identifiers.extend(await db.smembers(index_redis_key))
+        futures = [cls.load(db, identifier=p.decode()) for p in sorted(identifiers)]
+        return await asyncio.gather(*futures, loop=db.connection._loop)
+
+
+class TimeStampedModel(RedisModel):
+    """Model that automatically adds created_at and updated_at columns for you.
+    """
+    # Make created_at and updated_at a proper column
+    created_at = Column(type=str, sort=True)
+    updated_at = Column(type=str, sort=True)
+
+    # force only keyword arguments
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if kwargs.get('updated_at'):
+            self.updated_at = kwargs.pop('updated_at')
+        if kwargs.get('created_at'):
+            self.created_at = kwargs.pop('created_at')
+
+    async def save(self, db):
+        now = utcnow_with_tz().isoformat()
+        self.updated_at = now
+        if not await db.exists(self.redis_key()):
+            self.created_at = now
+        return await super().save(db)
