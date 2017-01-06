@@ -9,6 +9,9 @@ from itertools import product
 
 logger = logging.getLogger(__name__)
 
+VALUE_ID_SEPARATOR = '\x00'
+MODEL_NAME_ID_SEPARATOR = ':'
+
 
 class Column:
     """Defined fields (columns) for a given RedisModel.
@@ -126,7 +129,7 @@ class RedisModel(object, metaclass=ModelMeta):
         """Convenience method for computing the Redis object instance key
         from the identifier
         """
-        return "{}:{}".format(cls.key_prefix(), identifier)
+        return "{}{}{}".format(cls.key_prefix(), MODEL_NAME_ID_SEPARATOR, identifier)
 
     def has_real_data(self, column_name):
         return not isinstance(getattr(self, column_name), Column)
@@ -138,7 +141,7 @@ class RedisModel(object, metaclass=ModelMeta):
     def redis_key(self):
         """Key used for storage of object instance in Redis.
         """
-        return "{}:{}".format(self.key_prefix(), self.identifier())
+        return "{}{}{}".format(self.key_prefix(), MODEL_NAME_ID_SEPARATOR, self.identifier())
 
     def as_dict(self):
         """Dict version of this object
@@ -155,22 +158,24 @@ class RedisModel(object, metaclass=ModelMeta):
         key_components = ['index', self.key_prefix()]
         for column in self._indexed_columns:
             key_components.append(str(getattr(self, column.name)))
-        return ":".join(key_components)
+        return MODEL_NAME_ID_SEPARATOR.join(key_components)
 
     @classmethod
     def get_sort_column_key(cls, column_name):
-        return 'sort:{}:{}'.format(cls.key_prefix(), column_name)
+        return 'sort{}{}{}{}'.format(MODEL_NAME_ID_SEPARATOR, cls.key_prefix(), MODEL_NAME_ID_SEPARATOR, column_name)
 
     async def save_index(self, db, stale_object=None):
         current_index_redis_key = self.get_index_redis_key()
         for sort_column in self._sortable_column_names:
             if self.has_real_data(sort_column):
                 # Index it by adding to a sorted set with 0 score. It will be lexically sorted by redis
-                await db.zadd(
-                    self.get_sort_column_key(sort_column),
-                    0,
-                    '{}:{}'.format(getattr(self, sort_column), self.identifier())
-                )
+                index_key = self.get_sort_column_key(sort_column)
+                if stale_object:
+                    stale_index_value = '{}{}{}'.format(
+                        getattr(stale_object, sort_column), VALUE_ID_SEPARATOR, stale_object.identifier())
+                    await db.zrem(index_key, stale_index_value)
+                index_value = '{}{}{}'.format(getattr(self, sort_column), VALUE_ID_SEPARATOR, self.identifier())
+                await db.zadd(index_key, 0, index_value,)
 
         await db.sadd(current_index_redis_key, self.identifier())
         if stale_object:
@@ -218,7 +223,7 @@ class RedisModel(object, metaclass=ModelMeta):
     async def all_keys(cls, db):
         """Return all redis keys that are in the database for this class.
         """
-        return await db.keys("{}:*".format(cls.key_prefix()))
+        return await db.keys("{}{}*".format(cls.key_prefix(), MODEL_NAME_ID_SEPARATOR))
 
     @classmethod
     async def all(cls, db, order_by=None):
@@ -236,7 +241,11 @@ class RedisModel(object, metaclass=ModelMeta):
                 range_func = db.zrevrange
             all_keys = []
             for index_entry in await range_func(cls.get_sort_column_key(order_by).encode(), 0, -1):
-                all_keys.append('{}:{}'.format(cls.key_prefix(), index_entry.decode().split(':')[-1]))
+                all_keys.append('{}{}{}'.format(
+                    cls.key_prefix(),
+                    MODEL_NAME_ID_SEPARATOR,
+                    index_entry.decode().split(VALUE_ID_SEPARATOR)[-1])
+                )
         else:
             all_keys = await cls.all_keys(db)
         if not all_keys:
@@ -296,7 +305,7 @@ class RedisModel(object, metaclass=ModelMeta):
                         key_components.append(str(kwargs_copy[column.name]))  # Stringify field value
                 else:
                     key_components.append('*')
-            index_keys_collection.append(":".join(key_components))
+            index_keys_collection.append(MODEL_NAME_ID_SEPARATOR.join(key_components))
 
         if not index_keys_collection:
             key_components = ["index", cls.key_prefix()]
@@ -309,7 +318,7 @@ class RedisModel(object, metaclass=ModelMeta):
                         key_components.append(str(kwargs[column.name]))  # Stringify field value
                 else:
                     key_components.append('*')
-            index_keys_collection.append(":".join(key_components))
+            index_keys_collection.append(MODEL_NAME_ID_SEPARATOR.join(key_components))
 
         identifiers = []
         for all_index_keys in index_keys_collection:
