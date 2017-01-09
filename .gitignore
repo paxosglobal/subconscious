@@ -5,5 +5,7 @@
 nosetest_results_stderr.txt
 nosetest_results_stdout.txt
 report.txt
-
-
+MANIFEST
+dist/
+subconscious/__pycache__/
+tests/__pycache__/
