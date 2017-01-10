@@ -1,6 +1,6 @@
 from .base import BaseTestCase
 from subconscious.column import Integer, Column
-from subconscious.model import RedisModel
+from subconscious.model import RedisModel, BadDataError
 
 
 class TestUser(RedisModel):
@@ -19,8 +19,13 @@ class TestAutoInt(BaseTestCase):
         self.loop.run_until_complete(user.save(self.db))
         self.assertEqual(user.id, 2)
 
+    def test_setting_auto_increment_should_throw_bad_data_error(self):
         # Provide id
-        user = TestUser(id=777)
-        self.loop.run_until_complete(user.save(self.db))
-        self.assertEqual(user.id, 777)
-        self.assertEqual(user.auto_id, 3)
+        with self.assertRaises(BadDataError):
+            TestUser(id=777)
+
+        user = TestUser()
+        user.id = 424
+        # Should fail on save
+        with self.assertRaises(BadDataError):
+            self.loop.run_until_complete(user.save(self.db))

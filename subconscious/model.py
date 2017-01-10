@@ -101,6 +101,9 @@ class RedisModel(object, metaclass=ModelMeta):
                         column.enum_choices,
                     )
                     raise BadDataError(err_msg)
+                if getattr(column, 'auto_increment', False):
+                    err_msg = "Not allowed to set auto_increment column({})".format(column.name)
+                    raise BadDataError(err_msg)
 
                 setattr(self, column.name, value)
             else:
@@ -204,6 +207,9 @@ class RedisModel(object, metaclass=ModelMeta):
         for col in self._auto_columns:
             if not self.has_real_data(col.name):
                 setattr(self, col.name, await col.auto_generate(db, self))
+            else:
+                err_msg = "Not allowed to set auto_increment column({})".format(col.name)
+                raise BadDataError(err_msg)
 
         # we have to delete the old index key
         stale_object = await self.__class__.load(db, identifier=self.identifier())
