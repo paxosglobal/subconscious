@@ -2,7 +2,7 @@
 
 in-memory database for python3 only
 
-[![Build Status](https://travis-ci.com/paxos-bankchain/subconscious.svg?branch=develop)](https://travis-ci.com/paxos-bankchain/subconscious)
+[![Build Status](https://travis-ci.com/paxos-bankchain/subconscious.svg?branch=master)](https://travis-ci.com/paxos-bankchain/subconscious)
 
 *Install*
 
