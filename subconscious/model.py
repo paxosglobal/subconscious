@@ -13,7 +13,25 @@ VALUE_ID_SEPARATOR = '\x00'
 MODEL_NAME_ID_SEPARATOR = ':'
 
 
-class Column(object):
+# Exceptions
+
+class InvalidQuery(Exception):
+    pass
+
+class InvalidModelDefinition(Exception):
+    pass
+
+class InvalidColumnDefinition(Exception):
+    pass
+
+class BadDataError(Exception):
+    pass
+
+class UnexpectedColumnError(Exception):
+    pass
+
+
+class Column:
     """Defined fields (columns) for a given RedisModel.
     """
 
@@ -24,23 +42,27 @@ class Column(object):
         You can't have both a primary_key and composite_key in the same model.
         index is whether you want this column indexed or not for faster retrieval.
         """
-        # TODO: support for other field types (datetime, etc)
+        if type not in (str, int):
+            # TODO: support for other field types (datetime, uuid, etc)
+            err_msg = 'Bad Field Type: {}'.format(type)
+            raise InvalidColumnDefinition(err_msg)
+
+        if primary_key and composite_key:
+            err_msg = 'Column can be either primary_key or composite_key, but not both'
+            raise InvalidColumnDefinition(err_msg)
 
         self.field_type = type
-        assert self.field_type in (str, int)
         self.primary = primary_key is True
         self.composite = composite_key is True
         self.sorted = sort is True
-        assert not (self.primary and self.composite)
         self.indexed = (index is True) or self.composite
-        if required is False:
-            self.required = required
-        else:
-            self.required = (required is True) or self.primary or self.composite
+        self.required = required is True or self.primary or self.composite
 
         self.enum = enum
         if enum:
-            assert isinstance(enum, EnumMeta), enum
+            if not isinstance(enum, EnumMeta):
+                err_msg = '`{}` is not an instance of {}'.format(enum, EnumMeta)
+                raise InvalidColumnDefinition(err_msg)
             self.enum_choices = set([x.value for x in enum])
         else:
             self.enum_choices = set()
@@ -58,7 +80,7 @@ class ModelMeta(type):
             num_primary, num_composite = 0, 0
             cls._pk_name = None
             # grab all Columns from the model
-            for name, column in inspect.getmembers(cls, lambda col: isinstance(col, Column)):
+            for name, column in inspect.getmembers(cls, lambda col: type(col) == Column):
                 column.name = name
                 columns.append(column)
                 if column.primary:
@@ -66,8 +88,19 @@ class ModelMeta(type):
                     cls._pk_name = column.name
                 if column.composite:
                     num_composite += 1
-            assert (num_primary == 0 and num_composite > 1) or (num_primary == 1 and num_composite == 0), \
-                "{}: You need exactly 1 primary_key column or more than 1 composite_key columns".format(cls.__name__)
+
+            # Defensive checks
+            if num_primary == 0:
+                if num_composite == 0:
+                    err_msg = 'No primary key or composite key in {}'.format(cls.__name__)
+                    raise InvalidModelDefinition(err_msg)
+                if num_composite == 1:
+                    err_msg = 'Your composite key is really a primary key in {}'.format(cls.__name__)
+                    raise InvalidModelDefinition(err_msg)
+            if num_primary == 1:
+                if num_composite != 0:
+                    err_msg = 'Cannot have both primary and composite keys in {}'.format(cls.__name__)
+                    raise InvalidModelDefinition(err_msg)
 
             cls._columns = tuple(sorted(columns, key=lambda c: c.name))
             cls._indexed_columns = tuple(sorted([col for col in cls._columns if col.indexed], key=lambda c: c.name))
@@ -75,52 +108,55 @@ class ModelMeta(type):
             cls._identifier_columns = tuple(
                 sorted([col for col in cls._columns if col.primary or col.composite],
                        key=lambda c: c.name))
-            cls._auto_columns = sorted(
-                [col for col in cls._columns if getattr(col, 'auto', False)],
-                key=lambda c: c.name
-            )
             cls._queryable_colnames_set = set([col.name for col in cls._indexed_columns + cls._identifier_columns])
             cls._sortable_column_names = tuple([x.name for x in cls._sortable_columns])
-            cls._auto_column_names = tuple([x.name for x in cls._auto_columns])
 
 
 class RedisModel(object, metaclass=ModelMeta):
 
     # force only keyword arguments
-    def __init__(self, allow_unknown_cols=False, **kwargs):
+    def __init__(self, **kwargs):
         for column in self._columns:
             if column.name in kwargs:
                 value = kwargs.pop(column.name)
-                assert type(value) == column.field_type, "Column `{}` in {} has value {}, should be of type {}".format(
-                    column.name,
-                    self.__class__.__name__,
-                    value,
-                    column.field_type,
-                )
-                if column.enum_choices:
-                    assert value in column.enum_choices, "Column `{}` in {} has value {}, should be in set {}".format(
+                if type(value) != column.field_type:
+                    err_msg = "Column `{}` in {} has value {}, should be of type {}".format(
+                        column.name,
+                        self.__class__.__name__,
+                        value,
+                        column.field_type,
+                    )
+                    raise BadDataError(err_msg)
+
+                if column.enum_choices and value not in column.enum_choices:
+                    err_msg = "Column `{}` in {} has value {}, should be in set {}".format(
                         column.name,
                         self.__class__.__name__,
                         value,
                         column.enum_choices,
                     )
+                    raise BadDataError(err_msg)
+
                 setattr(self, column.name, value)
             else:
-                assert not (column.required and not getattr(column, 'auto', False)), 'Column `{}` in `{}` is required'.format(
-                    column.name,
-                    self.__class__.__name__,
-                )
+                if column.required:
+                    err_msg = 'Missing column `{}` in `{}` is required'.format(
+                        column.name,
+                        self.__class__.__name__,
+                    )
+                    raise BadDataError(err_msg)
 
-        if allow_unknown_cols is False:
-            # Require that every kwarg supplied matches an expected column
-            # TODO: handle TimeStampedModel cols better
-            known_cols_set = set([column.name for column in self._columns] + ['updated_at', 'created_at'])
-            supplied_cols_set = set([x for x in kwargs])
-            unknown_cols_set = supplied_cols_set - known_cols_set
-            assert unknown_cols_set == set(), 'Unknown column(s): {} in `{}`'.format(
+        # Require that every kwarg supplied matches an expected column
+        # TODO: handle TimeStampedModel cols better
+        known_cols_set = set([column.name for column in self._columns] + ['updated_at', 'created_at'])
+        supplied_cols_set = set([x for x in kwargs])
+        unknown_cols_set = supplied_cols_set - known_cols_set
+        if unknown_cols_set != set():
+            err_msg = 'Unknown column(s): {} in `{}`'.format(
                 unknown_cols_set,
                 self.__class__.__name__,
             )
+            raise UnexpectedColumnError(err_msg)
 
     @classmethod
     def key_prefix(cls):
@@ -177,9 +213,16 @@ class RedisModel(object, metaclass=ModelMeta):
                 index_key = self.get_sort_column_key(sort_column)
                 if stale_object:
                     stale_index_value = '{}{}{}'.format(
-                        getattr(stale_object, sort_column), VALUE_ID_SEPARATOR, stale_object.identifier())
+                        getattr(stale_object, sort_column),
+                        VALUE_ID_SEPARATOR,
+                        stale_object.identifier()
+                    )
                     await db.zrem(index_key, stale_index_value)
-                index_value = '{}{}{}'.format(getattr(self, sort_column), VALUE_ID_SEPARATOR, self.identifier())
+                index_value = '{}{}{}'.format(
+                    getattr(self, sort_column),
+                    VALUE_ID_SEPARATOR,
+                    self.identifier()
+                )
                 await db.zadd(index_key, 0, index_value,)
 
         await db.sadd(current_index_redis_key, self.identifier())
@@ -192,11 +235,6 @@ class RedisModel(object, metaclass=ModelMeta):
     async def save(self, db):
         """Save the object to Redis.
         """
-
-        for col in self._auto_columns:
-            if not self.has_real_data(col.name):
-                setattr(self, col.name, await col.auto_generate(db, self))
-
         # we have to delete the old index key
         stale_object = await self.__class__.load(db, identifier=self.identifier())
         success = await db.hmset_dict(self.redis_key(), self.__dict__.copy())
@@ -211,7 +249,8 @@ class RedisModel(object, metaclass=ModelMeta):
         """Load the object from redis. Use the identifier (colon-separated
         composite keys or the primary key) or the redis_key.
         """
-        assert identifier or redis_key
+        if not identifier and not redis_key:
+            raise InvalidQuery('Must supply identifier or redis_key')
         if redis_key is None:
             redis_key = cls.make_key(identifier)
         if await db.exists(redis_key):
@@ -244,7 +283,9 @@ class RedisModel(object, metaclass=ModelMeta):
                 direction, order_by = order_by[0], order_by[1:]
             else:
                 direction = '+'
-            assert order_by in cls._sortable_column_names
+            if order_by not in cls._sortable_column_names:
+                err_msg = 'order_by `{}` not in {}'.format(order_by, cls._sortable_column_names)
+                raise InvalidQuery(err_msg)
             if direction == '+':
                 range_func = db.zrange
             else:
@@ -274,10 +315,12 @@ class RedisModel(object, metaclass=ModelMeta):
 
         # Assert that the lookup keys are part of indexed, pk or composite keys
         missing_cols_set = set(kwargs.keys()) - cls._queryable_colnames_set
-        assert not missing_cols_set, '{missing_cols_set} not in {queryable_cols}'.format(
-            missing_cols_set=missing_cols_set,
-            queryable_cols=cls._queryable_colnames_set,
-        )
+        if missing_cols_set:
+            err_msg = '{missing_cols_set} not in {queryable_cols}'.format(
+                missing_cols_set=missing_cols_set,
+                queryable_cols=cls._queryable_colnames_set,
+            )
+            raise InvalidQuery(err_msg)
 
         # Check if PK is in the lookup field. If yes then do a load and return.
         if cls._pk_name in kwargs:
