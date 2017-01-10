@@ -3,8 +3,9 @@ import asyncio
 import inspect
 import logging
 
-from enum import EnumMeta
 from itertools import product
+
+from .column import Column
 
 
 logger = logging.getLogger(__name__)
@@ -23,56 +24,12 @@ class InvalidModelDefinition(Exception):
     pass
 
 
-class InvalidColumnDefinition(Exception):
-    pass
-
-
 class BadDataError(Exception):
     pass
 
 
 class UnexpectedColumnError(Exception):
     pass
-
-
-class Column(object):
-    """Defined fields (columns) for a given RedisModel.
-    """
-
-    def __init__(self, type=str, primary_key=None, composite_key=None, index=None,
-                 required=None, enum=None, sort=None):
-        """primary_key can exist in only a single column.
-        composite_key can exist in multiple columns.
-        You can't have both a primary_key and composite_key in the same model.
-        index is whether you want this column indexed or not for faster retrieval.
-        """
-        if type not in (str, int):
-            # TODO: support for other field types (datetime, uuid, etc)
-            err_msg = 'Bad Field Type: {}'.format(type)
-            raise InvalidColumnDefinition(err_msg)
-
-        if primary_key and composite_key:
-            err_msg = 'Column can be either primary_key or composite_key, but not both'
-            raise InvalidColumnDefinition(err_msg)
-
-        self.field_type = type
-        self.primary = primary_key is True
-        self.composite = composite_key is True
-        self.sorted = sort is True
-        self.indexed = (index is True) or self.composite
-        self.required = required is True or self.primary or self.composite
-
-        self.enum = enum
-        if enum:
-            if not isinstance(enum, EnumMeta):
-                err_msg = '`{}` is not an instance of {}'.format(enum, EnumMeta)
-                raise InvalidColumnDefinition(err_msg)
-            self.enum_choices = set([x.value for x in enum])
-        else:
-            self.enum_choices = set()
-
-    def __repr__(self):
-        return "<{}: {}>".format(self.__class__.__name__, self.name)
 
 
 class ModelMeta(type):
@@ -113,7 +70,7 @@ class ModelMeta(type):
                 sorted([col for col in cls._columns if col.primary or col.composite],
                        key=lambda c: c.name))
             cls._auto_columns = sorted(
-                [col for col in cls._columns if getattr(col, 'auto', False)],
+                [col for col in cls._columns if getattr(col, 'auto_increment', False)],
                 key=lambda c: c.name
             )
             cls._queryable_colnames_set = set([col.name for col in cls._indexed_columns + cls._identifier_columns])
@@ -147,7 +104,7 @@ class RedisModel(object, metaclass=ModelMeta):
 
                 setattr(self, column.name, value)
             else:
-                if column.required and not getattr(column, 'auto', False):
+                if column.required and not getattr(column, 'auto_increment', False):
                     err_msg = 'Missing column `{}` in `{}` is required'.format(
                         column.name,
                         self.__class__.__name__,

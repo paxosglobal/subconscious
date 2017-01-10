@@ -4,9 +4,9 @@ from subconscious.model import RedisModel
 
 
 class TestUser(RedisModel):
-    id = Integer(primary_key=True, auto=True)
+    id = Integer(primary_key=True, auto_increment=True)
     name = Column(type=str)
-    auto_id = Integer(auto=True)
+    auto_id = Integer(auto_increment=True)
 
 
 class TestAutoInt(BaseTestCase):
