@@ -8,4 +8,5 @@ report.txt
 MANIFEST
 dist/
 subconscious/__pycache__/
+subconscious.egg-info/
 tests/__pycache__/

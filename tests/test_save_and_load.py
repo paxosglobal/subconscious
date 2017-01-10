@@ -1,4 +1,4 @@
-from subconscious.model import RedisModel, Column
+from subconscious.model import RedisModel, Column, InvalidModelDefinition, UnexpectedColumnError
 from uuid import uuid1
 from .base import BaseTestCase
 import enum
@@ -27,3 +27,18 @@ class TestSaveAndLoad(BaseTestCase):
         # load
         user_in_db = self.loop.run_until_complete(TestUser.load(self.db, identifier=user_id))
         self.assertEqual(user_in_db.name, user.name)
+
+    def test_init_model_with_no_indexed_cols_should_error(self):
+        with self.assertRaises(InvalidModelDefinition):
+            class BadModel(RedisModel):
+                unindex_col = Column()
+
+class BadSave(BaseTestCase):
+
+    def test_unexpected_column_should_fail(self):
+
+        class TestModel(RedisModel):
+            id = Column(type=int, primary_key=True)
+
+        with self.assertRaises(UnexpectedColumnError):
+            TestModel(id=1, this_column_does_not_exist='foo')
