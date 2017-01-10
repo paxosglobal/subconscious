@@ -54,8 +54,17 @@ class Integer(Column):
             index=None,
             required=None,
             enum=None,
-            sort=None, auto_increment=False):
-        super(Integer, self).__init__(int, primary_key, composite_key, index, required, enum, sort)
+            sort=None,
+            auto_increment=False,):
+        super(Integer, self).__init__(
+            int,
+            primary_key=primary_key,
+            composite_key=composite_key,
+            index=index,
+            required=required,
+            enum=enum,
+            sort=sort,
+        )
         self.auto_increment = auto_increment
 
     async def auto_generate(self, db, model):
