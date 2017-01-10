@@ -27,7 +27,7 @@ class InvalidColumnDefinition(Exception):
 class BadDataError(Exception):
     pass
 
-class DefensiveProgrammingError(Exception):
+class UnexpectedColumnError(Exception):
     pass
 
 
@@ -115,7 +115,7 @@ class ModelMeta(type):
 class RedisModel(object, metaclass=ModelMeta):
 
     # force only keyword arguments
-    def __init__(self, allow_unknown_cols=False, **kwargs):
+    def __init__(self, **kwargs):
         for column in self._columns:
             if column.name in kwargs:
                 value = kwargs.pop(column.name)
@@ -146,18 +146,17 @@ class RedisModel(object, metaclass=ModelMeta):
                     )
                     raise BadDataError(err_msg)
 
-        if allow_unknown_cols is False:
-            # Require that every kwarg supplied matches an expected column
-            # TODO: handle TimeStampedModel cols better
-            known_cols_set = set([column.name for column in self._columns] + ['updated_at', 'created_at'])
-            supplied_cols_set = set([x for x in kwargs])
-            unknown_cols_set = supplied_cols_set - known_cols_set
-            if unknown_cols_set != set():
-                err_msg = 'Unknown column(s): {} in `{}`'.format(
-                    unknown_cols_set,
-                    self.__class__.__name__,
-                )
-                raise DefensiveProgrammingError(err_msg)
+        # Require that every kwarg supplied matches an expected column
+        # TODO: handle TimeStampedModel cols better
+        known_cols_set = set([column.name for column in self._columns] + ['updated_at', 'created_at'])
+        supplied_cols_set = set([x for x in kwargs])
+        unknown_cols_set = supplied_cols_set - known_cols_set
+        if unknown_cols_set != set():
+            err_msg = 'Unknown column(s): {} in `{}`'.format(
+                unknown_cols_set,
+                self.__class__.__name__,
+            )
+            raise UnexpectedColumnError(err_msg)
 
     @classmethod
     def key_prefix(cls):
