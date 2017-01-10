@@ -1,4 +1,4 @@
-from subconscious.model import RedisModel, Column
+from subconscious.model import RedisModel, Column, InvalidQuery
 from uuid import uuid1
 from .base import BaseTestCase
 import enum
@@ -63,21 +63,17 @@ class TestAll(BaseTestCase):
         self.assertEqual('Test name', users[1].name)
         self.assertEqual('Test name2', users[2].name)
 
-    def test_filter_by_non_existing_fields(self):
-        # Calls to filter_by with non existing fields should throw AssertionError
-        self.assertRaises(
-            AssertionError,
-            lambda: self.loop.run_until_complete(TestUser.filter_by(
+    def test_filter_by_non_existing_fields_should_fail(self):
+        with self.assertRaises(InvalidQuery):
+            self.loop.run_until_complete(TestUser.filter_by(
                 db=self.db,
                 non_existing1='dummy',
                 non_existing2=1
-            )))
+            ))
 
-    def test_filter_by_non_indexed_filed(self):
-        # Calls to filter_by with non indexed fields should throw AssertionError
-        self.assertRaises(
-            AssertionError,
-            lambda: self.loop.run_until_complete(TestUser.filter_by(
+    def test_filter_by_non_indexed_filed_should_fail(self):
+        with self.assertRaises(InvalidQuery):
+            self.loop.run_until_complete(TestUser.filter_by(
                 db=self.db,
                 status='active',
-            )))
+            ))
