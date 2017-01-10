@@ -2,6 +2,8 @@
 
 in-memory database for python3 only
 
+[![Build Status](https://travis-ci.com/paxos-bankchain/subconscious.svg?branch=master)](https://travis-ci.com/paxos-bankchain/subconscious)
+
 *Install*
 
 pip install git+https://github.com/paxos-bankchain/subconscious.git
