@@ -18,20 +18,24 @@ MODEL_NAME_ID_SEPARATOR = ':'
 class InvalidQuery(Exception):
     pass
 
+
 class InvalidModelDefinition(Exception):
     pass
+
 
 class InvalidColumnDefinition(Exception):
     pass
 
+
 class BadDataError(Exception):
     pass
+
 
 class UnexpectedColumnError(Exception):
     pass
 
 
-class Column:
+class Column(object):
     """Defined fields (columns) for a given RedisModel.
     """
 
@@ -80,7 +84,7 @@ class ModelMeta(type):
             num_primary, num_composite = 0, 0
             cls._pk_name = None
             # grab all Columns from the model
-            for name, column in inspect.getmembers(cls, lambda col: type(col) == Column):
+            for name, column in inspect.getmembers(cls, lambda col: isinstance(col, Column)):
                 column.name = name
                 columns.append(column)
                 if column.primary:
@@ -108,6 +112,10 @@ class ModelMeta(type):
             cls._identifier_columns = tuple(
                 sorted([col for col in cls._columns if col.primary or col.composite],
                        key=lambda c: c.name))
+            cls._auto_columns = sorted(
+                [col for col in cls._columns if getattr(col, 'auto', False)],
+                key=lambda c: c.name
+            )
             cls._queryable_colnames_set = set([col.name for col in cls._indexed_columns + cls._identifier_columns])
             cls._sortable_column_names = tuple([x.name for x in cls._sortable_columns])
 
@@ -139,7 +147,7 @@ class RedisModel(object, metaclass=ModelMeta):
 
                 setattr(self, column.name, value)
             else:
-                if column.required:
+                if column.required and not getattr(column, 'auto', False):
                     err_msg = 'Missing column `{}` in `{}` is required'.format(
                         column.name,
                         self.__class__.__name__,
@@ -235,6 +243,11 @@ class RedisModel(object, metaclass=ModelMeta):
     async def save(self, db):
         """Save the object to Redis.
         """
+
+        for col in self._auto_columns:
+            if not self.has_real_data(col.name):
+                setattr(self, col.name, await col.auto_generate(db, self))
+
         # we have to delete the old index key
         stale_object = await self.__class__.load(db, identifier=self.identifier())
         success = await db.hmset_dict(self.redis_key(), self.__dict__.copy())
