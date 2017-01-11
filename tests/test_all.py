@@ -71,7 +71,7 @@ class TestAll(BaseTestCase):
                 non_existing2=1
             ))
 
-    def test_filter_by_non_indexed_filed_should_fail(self):
+    def test_filter_by_non_indexed_field_should_fail(self):
         with self.assertRaises(InvalidQuery):
             self.loop.run_until_complete(TestUser.filter_by(
                 db=self.db,

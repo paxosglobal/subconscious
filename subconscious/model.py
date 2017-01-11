@@ -3,8 +3,9 @@ import asyncio
 import inspect
 import logging
 
-from enum import EnumMeta
 from itertools import product
+
+from .column import Column
 
 
 logger = logging.getLogger(__name__)
@@ -18,57 +19,17 @@ MODEL_NAME_ID_SEPARATOR = ':'
 class InvalidQuery(Exception):
     pass
 
+
 class InvalidModelDefinition(Exception):
     pass
 
-class InvalidColumnDefinition(Exception):
-    pass
 
 class BadDataError(Exception):
     pass
 
+
 class UnexpectedColumnError(Exception):
     pass
-
-
-class Column:
-    """Defined fields (columns) for a given RedisModel.
-    """
-
-    def __init__(self, type=str, primary_key=None, composite_key=None, index=None,
-                 required=None, enum=None, sort=None):
-        """primary_key can exist in only a single column.
-        composite_key can exist in multiple columns.
-        You can't have both a primary_key and composite_key in the same model.
-        index is whether you want this column indexed or not for faster retrieval.
-        """
-        if type not in (str, int):
-            # TODO: support for other field types (datetime, uuid, etc)
-            err_msg = 'Bad Field Type: {}'.format(type)
-            raise InvalidColumnDefinition(err_msg)
-
-        if primary_key and composite_key:
-            err_msg = 'Column can be either primary_key or composite_key, but not both'
-            raise InvalidColumnDefinition(err_msg)
-
-        self.field_type = type
-        self.primary = primary_key is True
-        self.composite = composite_key is True
-        self.sorted = sort is True
-        self.indexed = (index is True) or self.composite
-        self.required = required is True or self.primary or self.composite
-
-        self.enum = enum
-        if enum:
-            if not isinstance(enum, EnumMeta):
-                err_msg = '`{}` is not an instance of {}'.format(enum, EnumMeta)
-                raise InvalidColumnDefinition(err_msg)
-            self.enum_choices = set([x.value for x in enum])
-        else:
-            self.enum_choices = set()
-
-    def __repr__(self):
-        return "<{}: {}>".format(self.__class__.__name__, self.name)
 
 
 class ModelMeta(type):
@@ -80,7 +41,7 @@ class ModelMeta(type):
             num_primary, num_composite = 0, 0
             cls._pk_name = None
             # grab all Columns from the model
-            for name, column in inspect.getmembers(cls, lambda col: type(col) == Column):
+            for name, column in inspect.getmembers(cls, lambda col: isinstance(col, Column)):
                 column.name = name
                 columns.append(column)
                 if column.primary:
@@ -108,14 +69,20 @@ class ModelMeta(type):
             cls._identifier_columns = tuple(
                 sorted([col for col in cls._columns if col.primary or col.composite],
                        key=lambda c: c.name))
+            cls._auto_columns = sorted(
+                [col for col in cls._columns if getattr(col, 'auto_increment', False)],
+                key=lambda c: c.name
+            )
             cls._queryable_colnames_set = set([col.name for col in cls._indexed_columns + cls._identifier_columns])
             cls._sortable_column_names = tuple([x.name for x in cls._sortable_columns])
+            cls._auto_column_names = {col.name for col in cls._auto_columns}
 
 
 class RedisModel(object, metaclass=ModelMeta):
 
     # force only keyword arguments
     def __init__(self, **kwargs):
+        loading = kwargs.pop('loading', False)
         for column in self._columns:
             if column.name in kwargs:
                 value = kwargs.pop(column.name)
@@ -136,10 +103,13 @@ class RedisModel(object, metaclass=ModelMeta):
                         column.enum_choices,
                     )
                     raise BadDataError(err_msg)
+                if getattr(column, 'auto_increment', False) and not loading:
+                    err_msg = "Not allowed to set auto_increment column({})".format(column.name)
+                    raise BadDataError(err_msg)
 
-                setattr(self, column.name, value)
+                self.__dict__.update({column.name: value})
             else:
-                if column.required:
+                if column.required and not getattr(column, 'auto_increment', False):
                     err_msg = 'Missing column `{}` in `{}` is required'.format(
                         column.name,
                         self.__class__.__name__,
@@ -157,6 +127,13 @@ class RedisModel(object, metaclass=ModelMeta):
                 self.__class__.__name__,
             )
             raise UnexpectedColumnError(err_msg)
+
+    def __setattr__(self, name, value):
+        if name in self._auto_column_names:
+            err_msg = "Not allowed to set auto_increment column({})".format(name)
+            raise BadDataError(err_msg)
+
+        return super(RedisModel, self).__setattr__(name, value)
 
     @classmethod
     def key_prefix(cls):
@@ -235,6 +212,12 @@ class RedisModel(object, metaclass=ModelMeta):
     async def save(self, db):
         """Save the object to Redis.
         """
+        kwargs = {}
+        for col in self._auto_columns:
+            if not self.has_real_data(col.name):
+                kwargs[col.name] = await col.auto_generate(db, self)
+        self.__dict__.update(kwargs)
+
         # we have to delete the old index key
         stale_object = await self.__class__.load(db, identifier=self.identifier())
         success = await db.hmset_dict(self.redis_key(), self.__dict__.copy())
@@ -263,6 +246,7 @@ class RedisModel(object, metaclass=ModelMeta):
                     kwargs[key] = value
                 else:
                     kwargs[key] = column.field_type(value)
+            kwargs['loading'] = True
             return cls(**kwargs)
         else:
             logger.info("No Redis key found: {}".format(redis_key))

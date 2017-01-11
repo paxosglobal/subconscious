@@ -33,6 +33,7 @@ class TestSaveAndLoad(BaseTestCase):
             class BadModel(RedisModel):
                 unindex_col = Column()
 
+
 class BadSave(BaseTestCase):
 
     def test_unexpected_column_should_fail(self):
