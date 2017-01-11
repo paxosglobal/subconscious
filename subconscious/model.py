@@ -75,12 +75,14 @@ class ModelMeta(type):
             )
             cls._queryable_colnames_set = set([col.name for col in cls._indexed_columns + cls._identifier_columns])
             cls._sortable_column_names = tuple([x.name for x in cls._sortable_columns])
+            cls._auto_column_names = {col.name for col in cls._auto_columns}
 
 
 class RedisModel(object, metaclass=ModelMeta):
 
     # force only keyword arguments
     def __init__(self, **kwargs):
+        loading = kwargs.pop('loading', False)
         for column in self._columns:
             if column.name in kwargs:
                 value = kwargs.pop(column.name)
@@ -101,11 +103,11 @@ class RedisModel(object, metaclass=ModelMeta):
                         column.enum_choices,
                     )
                     raise BadDataError(err_msg)
-                if getattr(column, 'auto_increment', False):
+                if getattr(column, 'auto_increment', False) and not loading:
                     err_msg = "Not allowed to set auto_increment column({})".format(column.name)
                     raise BadDataError(err_msg)
 
-                setattr(self, column.name, value)
+                self.__dict__.update({column.name: value})
             else:
                 if column.required and not getattr(column, 'auto_increment', False):
                     err_msg = 'Missing column `{}` in `{}` is required'.format(
@@ -125,6 +127,13 @@ class RedisModel(object, metaclass=ModelMeta):
                 self.__class__.__name__,
             )
             raise UnexpectedColumnError(err_msg)
+
+    def __setattr__(self, name, value):
+        if name in self._auto_column_names:
+            err_msg = "Not allowed to set auto_increment column({})".format(name)
+            raise BadDataError(err_msg)
+
+        return super(RedisModel, self).__setattr__(name, value)
 
     @classmethod
     def key_prefix(cls):
@@ -203,13 +212,11 @@ class RedisModel(object, metaclass=ModelMeta):
     async def save(self, db):
         """Save the object to Redis.
         """
-
+        kwargs = {}
         for col in self._auto_columns:
             if not self.has_real_data(col.name):
-                setattr(self, col.name, await col.auto_generate(db, self))
-            else:
-                err_msg = "Not allowed to set auto_increment column({})".format(col.name)
-                raise BadDataError(err_msg)
+                kwargs[col.name] = await col.auto_generate(db, self)
+        self.__dict__.update(kwargs)
 
         # we have to delete the old index key
         stale_object = await self.__class__.load(db, identifier=self.identifier())
@@ -239,6 +246,7 @@ class RedisModel(object, metaclass=ModelMeta):
                     kwargs[key] = value
                 else:
                     kwargs[key] = column.field_type(value)
+            kwargs['loading'] = True
             return cls(**kwargs)
         else:
             logger.info("No Redis key found: {}".format(redis_key))
