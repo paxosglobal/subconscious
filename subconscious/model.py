@@ -249,7 +249,7 @@ class RedisModel(object, metaclass=ModelMeta):
             kwargs['loading'] = True
             return cls(**kwargs)
         else:
-            logger.info("No Redis key found: {}".format(redis_key))
+            logger.debug("No Redis key found: {}".format(redis_key))
             return None
 
     @classmethod
