@@ -11,6 +11,7 @@ class BaseTestCase(TestCase):
             address=('localhost', 6379),
             db=13,
             loop=self.loop,
+            encoding='utf-8',
         )
         self.db = self.loop.run_until_complete(db_co)
 

@@ -240,7 +240,7 @@ class RedisModel(object, metaclass=ModelMeta):
             data = await db.hgetall(redis_key)
             kwargs = {}
             for key_bin, value_bin in data.items():
-                key, value = key_bin.decode(), value_bin.decode()
+                key, value = key_bin, value_bin
                 column = getattr(cls, key, False)
                 if not column or (column.field_type == str):
                     kwargs[key] = value
@@ -275,11 +275,11 @@ class RedisModel(object, metaclass=ModelMeta):
             else:
                 range_func = db.zrevrange
             all_keys = []
-            for index_entry in await range_func(cls.get_sort_column_key(order_by).encode(), 0, -1):
+            for index_entry in await range_func(cls.get_sort_column_key(order_by), 0, -1):
                 all_keys.append('{}{}{}'.format(
                     cls.key_prefix(),
                     MODEL_NAME_ID_SEPARATOR,
-                    index_entry.decode().split(VALUE_ID_SEPARATOR)[-1])
+                    index_entry.split(VALUE_ID_SEPARATOR)[-1])
                 )
         else:
             all_keys = await cls.all_keys(db)
@@ -361,5 +361,5 @@ class RedisModel(object, metaclass=ModelMeta):
         for all_index_keys in index_keys_collection:
             for index_redis_key in await db.keys(all_index_keys):
                 identifiers.extend(await db.smembers(index_redis_key))
-        futures = [cls.load(db, identifier=p.decode()) for p in sorted(identifiers)]
+        futures = [cls.load(db, identifier=p) for p in sorted(identifiers)]
         return await asyncio.gather(*futures, loop=db.connection._loop)
