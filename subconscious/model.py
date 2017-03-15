@@ -359,7 +359,10 @@ class RedisModel(object, metaclass=ModelMeta):
 
         identifiers = []
         for all_index_keys in index_keys_collection:
-            for index_redis_key in await db.keys(all_index_keys):
-                identifiers.extend(await db.smembers(index_redis_key))
-        futures = [cls.load(db, identifier=p) for p in sorted(identifiers)]
-        return await asyncio.gather(*futures, loop=db.connection._loop)
+            cur = b'0'
+            while cur:
+                cur, keys = await db.scan(cur, match=all_index_keys)
+                for k in keys:
+                    identifiers.extend(await db.smembers(k))
+        _futures = [cls.load(db, identifier=p) for p in sorted(identifiers)]
+        return await asyncio.gather(*_futures, loop=db.connection._loop)
