@@ -3,6 +3,7 @@ import asyncio
 import inspect
 import logging
 
+from datetime import datetime
 from itertools import product
 
 from .column import Column
@@ -358,11 +359,14 @@ class RedisModel(object, metaclass=ModelMeta):
             index_keys_collection.append(MODEL_NAME_ID_SEPARATOR.join(key_components))
 
         identifiers = []
+        start = datetime.utcnow()
         for all_index_keys in index_keys_collection:
-            cur = b'0'
-            while cur:
-                cur, keys = await db.scan(cur, match=all_index_keys, count=100)
-                for k in keys:
-                    identifiers.extend(await db.smembers(k))
+            async for k in db.iscan(match=all_index_keys):
+                identifiers.extend(await db.smembers(k))
+        logger.debug('Scan loop took {} seconds for {}'.format((datetime.utcnow() - start).total_seconds(),
+                                                               index_keys_collection))
+        start = datetime.utcnow()
         _futures = [cls.load(db, identifier=p) for p in sorted(identifiers)]
-        return await asyncio.gather(*_futures, loop=db.connection._loop)
+        result = await asyncio.gather(*_futures, loop=db.connection._loop)
+        logger.debug('Gathering entities took {} seconds'.format((datetime.utcnow() - start).total_seconds()))
+        return result
