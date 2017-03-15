@@ -361,7 +361,7 @@ class RedisModel(object, metaclass=ModelMeta):
         for all_index_keys in index_keys_collection:
             cur = b'0'
             while cur:
-                cur, keys = await db.scan(cur, match=all_index_keys)
+                cur, keys = await db.scan(cur, match=all_index_keys, count=100)
                 for k in keys:
                     identifiers.extend(await db.smembers(k))
         _futures = [cls.load(db, identifier=p) for p in sorted(identifiers)]
