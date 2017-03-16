@@ -74,7 +74,9 @@ class ModelMeta(type):
                 [col for col in cls._columns if getattr(col, 'auto_increment', False)],
                 key=lambda c: c.name
             )
-            cls._queryable_colnames_set = set([col.name for col in cls._indexed_columns + cls._identifier_columns])
+            cls._queryable_colnames_set = set(
+                [col.name for col in cls._indexed_columns + cls._identifier_columns + cls._sortable_columns]
+            )
             cls._sortable_column_names = tuple([x.name for x in cls._sortable_columns])
             cls._auto_column_names = {col.name for col in cls._auto_columns}
             cls._indexed_column_names = {col.name for col in cls._indexed_columns}
