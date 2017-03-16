@@ -410,7 +410,7 @@ class RedisModel(object, metaclass=ModelMeta):
             else:
                 result_set = result_set.intersection(temp_set)
         futures = []
-        for key in result_set:
+        for key in sorted(result_set):
             futures.append(cls.load(db, key))
 
         return await asyncio.gather(*futures, loop=db.connection._loop)
