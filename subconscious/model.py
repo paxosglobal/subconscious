@@ -416,4 +416,4 @@ class RedisModel(object, metaclass=ModelMeta):
         for key in result_set:
             futures.append(cls.load(db, key))
 
-        return await asyncio.gather(*futures)
+        return await asyncio.gather(*futures, loop=db.connection._loop)
