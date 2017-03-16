@@ -81,6 +81,7 @@ class ModelMeta(type):
             cls._auto_column_names = {col.name for col in cls._auto_columns}
             cls._indexed_column_names = {col.name for col in cls._indexed_columns}
             cls._columns_map = {c.name: c for c in cls._columns}
+            cls._identifier_column_names = tuple([x.name for x in cls._identifier_columns])
 
 
 class RedisModel(object, metaclass=ModelMeta):
@@ -258,36 +259,30 @@ class RedisModel(object, metaclass=ModelMeta):
             return None
 
     @classmethod
-    async def all_keys(cls, db):
-        """Return all redis keys that are in the database for this class.
-        """
-        return await db.keys("{}{}*".format(cls.key_prefix(), MODEL_NAME_ID_SEPARATOR))
-
-    @classmethod
     async def all(cls, db, order_by=None):
         """Return all object instances of this class that's in the db.
         """
-        if order_by:
-            if order_by[0] in ['+', '-']:
-                direction, order_by = order_by[0], order_by[1:]
-            else:
-                direction = '+'
-            if order_by not in cls._sortable_column_names:
-                err_msg = 'order_by `{}` not in {}'.format(order_by, cls._sortable_column_names)
-                raise InvalidQuery(err_msg)
-            if direction == '+':
-                range_func = db.zrange
-            else:
-                range_func = db.zrevrange
-            all_keys = []
-            for index_entry in await range_func(cls.get_sort_column_key(order_by), 0, -1):
-                all_keys.append('{}{}{}'.format(
-                    cls.key_prefix(),
-                    MODEL_NAME_ID_SEPARATOR,
-                    index_entry.split(VALUE_ID_SEPARATOR)[-1])
-                )
+        if not order_by:
+            order_by = cls._identifier_column_names[0]
+        if order_by[0] in ['+', '-']:
+            direction, order_by = order_by[0], order_by[1:]
         else:
-            all_keys = await cls.all_keys(db)
+            direction = '+'
+        if order_by not in cls._queryable_colnames_set:
+            err_msg = 'order_by `{}` not in {}'.format(order_by, cls._queryable_colnames_set)
+            raise InvalidQuery(err_msg)
+        if direction == '+':
+            range_func = db.zrange
+        else:
+            range_func = db.zrevrange
+        all_keys = []
+        for index_entry in await range_func(cls.get_sort_column_key(order_by), 0, -1):
+            all_keys.append('{}{}{}'.format(
+                cls.key_prefix(),
+                MODEL_NAME_ID_SEPARATOR,
+                index_entry.split(VALUE_ID_SEPARATOR)[-1])
+            )
+
         if not all_keys:
             return []
         futures = []
