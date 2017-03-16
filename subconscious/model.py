@@ -78,6 +78,7 @@ class ModelMeta(type):
             cls._sortable_column_names = tuple([x.name for x in cls._sortable_columns])
             cls._auto_column_names = {col.name for col in cls._auto_columns}
             cls._indexed_column_names = {col.name for col in cls._indexed_columns}
+            cls._columns_map = {c.name: c for c in cls._columns}
 
 
 class RedisModel(object, metaclass=ModelMeta):
@@ -186,7 +187,7 @@ class RedisModel(object, metaclass=ModelMeta):
 
     async def save_index(self, db, stale_object=None):
         current_index_redis_key = self.get_index_redis_key()
-        for indexed_column in set(list(self._sortable_column_names) + list(self._indexed_column_names)):
+        for indexed_column in self._queryable_colnames_set:
             # if self.has_real_data(indexed_column):
             # Index it by adding to a sorted set with 0 score. It will be lexically sorted by redis
             index_key = self.get_sort_column_key(indexed_column)
@@ -374,7 +375,13 @@ class RedisModel(object, metaclass=ModelMeta):
 
 
     @classmethod
-    async def find_by(cls, db, **kwargs):
+    async def get_by(cls, db, **kwargs):
+        """Query by attributes. Ordering is not supported
+        Example:
+            User.get_by(db, age=[32, 54])
+            User.get_by(db, age=23, name="guido")
+
+        """
         # Assert that the lookup keys are part of indexed, pk or composite keys
         missing_cols_set = set(kwargs.keys()) - cls._queryable_colnames_set
         if missing_cols_set:
@@ -383,19 +390,31 @@ class RedisModel(object, metaclass=ModelMeta):
                 queryable_cols=cls._queryable_colnames_set,
             )
             raise InvalidQuery(err_msg)
-        # Check if PK is in the lookup field. If yes then do a load and return.
-        if cls._pk_name in kwargs:
-            entity = await cls.load(db, identifier=kwargs.get(cls._pk_name))
-            # Now match with the other fields supplied for lookup
-            for key, val in kwargs.items():
-                if key == cls._pk_name:
-                    continue
-                if type(val) == list:
-                    if getattr(entity, key) not in val:
-                        return []
-                elif getattr(entity, key) != val:
-                    return []
-            return [entity]
-        for field, value in kwargs:
-            pass
+        result_set = set()
+        first_iteration = True
+        for k, v in kwargs.items():
+            if v is None:
+                v = cls._columns_map[k]
+            if isinstance(v, (list, tuple)):
+                values = [str(x) for x in v]
+            else:
+                values = (str(v),)
+            temp_set = set()
+            for value in values:
+                index_key = 'sort:{key_prefix}:{column_name}'.format(
+                    key_prefix=cls.key_prefix(),
+                    column_name=k)
+                temp_set = temp_set.union({x.partition(VALUE_ID_SEPARATOR)[2] for x in await db.zrangebylex(
+                    index_key,
+                    min='{}{}'.format(value, VALUE_ID_SEPARATOR).encode(),
+                    max='{}{}\xff'.format(value, VALUE_ID_SEPARATOR).encode())})
+            if first_iteration:
+                result_set = result_set.union(temp_set)
+                first_iteration = False
+            else:
+                result_set = result_set.intersection(temp_set)
+        futures = []
+        for key in result_set:
+            futures.append(cls.load(db, key))
 
+        return await asyncio.gather(*futures)
