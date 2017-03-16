@@ -77,6 +77,7 @@ class ModelMeta(type):
             cls._queryable_colnames_set = set([col.name for col in cls._indexed_columns + cls._identifier_columns])
             cls._sortable_column_names = tuple([x.name for x in cls._sortable_columns])
             cls._auto_column_names = {col.name for col in cls._auto_columns}
+            cls._indexed_column_names = {col.name for col in cls._indexed_columns}
 
 
 class RedisModel(object, metaclass=ModelMeta):
@@ -185,23 +186,23 @@ class RedisModel(object, metaclass=ModelMeta):
 
     async def save_index(self, db, stale_object=None):
         current_index_redis_key = self.get_index_redis_key()
-        for sort_column in self._sortable_column_names:
-            if self.has_real_data(sort_column):
-                # Index it by adding to a sorted set with 0 score. It will be lexically sorted by redis
-                index_key = self.get_sort_column_key(sort_column)
-                if stale_object:
-                    stale_index_value = '{}{}{}'.format(
-                        getattr(stale_object, sort_column),
-                        VALUE_ID_SEPARATOR,
-                        stale_object.identifier()
-                    )
-                    await db.zrem(index_key, stale_index_value)
-                index_value = '{}{}{}'.format(
-                    getattr(self, sort_column),
+        for indexed_column in set(list(self._sortable_column_names) + list(self._indexed_column_names)):
+            # if self.has_real_data(indexed_column):
+            # Index it by adding to a sorted set with 0 score. It will be lexically sorted by redis
+            index_key = self.get_sort_column_key(indexed_column)
+            if stale_object:
+                stale_index_value = '{}{}{}'.format(
+                    getattr(stale_object, indexed_column),
                     VALUE_ID_SEPARATOR,
-                    self.identifier()
+                    stale_object.identifier()
                 )
-                await db.zadd(index_key, 0, index_value,)
+                await db.zrem(index_key, stale_index_value)
+            index_value = '{}{}{}'.format(
+                getattr(self, indexed_column),
+                VALUE_ID_SEPARATOR,
+                self.identifier()
+            )
+            await db.zadd(index_key, 0, index_value,)
 
         await db.sadd(current_index_redis_key, self.identifier())
         if stale_object:
@@ -370,3 +371,31 @@ class RedisModel(object, metaclass=ModelMeta):
         result = await asyncio.gather(*_futures, loop=db.connection._loop)
         logger.debug('Gathering entities took {} seconds'.format((datetime.utcnow() - start).total_seconds()))
         return result
+
+
+    @classmethod
+    async def find_by(cls, db, **kwargs):
+        # Assert that the lookup keys are part of indexed, pk or composite keys
+        missing_cols_set = set(kwargs.keys()) - cls._queryable_colnames_set
+        if missing_cols_set:
+            err_msg = '{missing_cols_set} not in {queryable_cols}'.format(
+                missing_cols_set=missing_cols_set,
+                queryable_cols=cls._queryable_colnames_set,
+            )
+            raise InvalidQuery(err_msg)
+        # Check if PK is in the lookup field. If yes then do a load and return.
+        if cls._pk_name in kwargs:
+            entity = await cls.load(db, identifier=kwargs.get(cls._pk_name))
+            # Now match with the other fields supplied for lookup
+            for key, val in kwargs.items():
+                if key == cls._pk_name:
+                    continue
+                if type(val) == list:
+                    if getattr(entity, key) not in val:
+                        return []
+                elif getattr(entity, key) != val:
+                    return []
+            return [entity]
+        for field, value in kwargs:
+            pass
+
