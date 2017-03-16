@@ -6,6 +6,7 @@ import enum
 
 class StatusEnum(enum.Enum):
     ACTIVE = 'active'
+    INACTIVE = 'inactive'
 
 
 class TestUser(RedisModel):
@@ -40,6 +41,12 @@ class TestFilterBy(BaseTestCase):
         self.assertEqual(2, len(users))
         users = self.loop.run_until_complete(TestUser.get_by(self.db, status='active'))
         self.assertEqual(10, len(users))
+        user = users[0]
+        user.status = 'inactive'
+        self.loop.run_until_complete(user.save(self.db))
+        users = self.loop.run_until_complete(TestUser.get_by(self.db, status='active'))
+        # Should be one less now 10 - 1 = 9
+        self.assertEqual(9, len(users))
 
     def test_get_by_none(self):
         users = self.loop.run_until_complete(TestUser.get_by(self.db, name=None))
