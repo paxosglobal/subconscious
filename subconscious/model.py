@@ -373,7 +373,6 @@ class RedisModel(object, metaclass=ModelMeta):
         logger.debug('Gathering entities took {} seconds'.format((datetime.utcnow() - start).total_seconds()))
         return result
 
-
     @classmethod
     async def get_by(cls, db, **kwargs):
         """Query by attributes. Ordering is not supported
