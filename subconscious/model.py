@@ -4,6 +4,7 @@ import inspect
 import logging
 
 from .column import Column
+from .util import timeit
 
 
 logger = logging.getLogger(__name__)
@@ -197,6 +198,7 @@ class RedisModel(object, metaclass=ModelMeta):
             # Index it by adding to a sorted set with 0 score. It will be lexically sorted by redis
             await db.zadd(index_key, 0, index_value,)
 
+    @timeit
     async def save(self, db):
         """Save the object to Redis.
         """
@@ -212,10 +214,12 @@ class RedisModel(object, metaclass=ModelMeta):
         await self.save_index(db, stale_object=stale_object)
         return success
 
+    @timeit
     async def exists(self, db):
         return await db.exists(self.redis_key())
 
     @classmethod
+    @timeit
     async def load(cls, db, identifier=None, redis_key=None):
         """Load the object from redis. Use the identifier (colon-separated
         composite keys or the primary key) or the redis_key.
@@ -241,6 +245,7 @@ class RedisModel(object, metaclass=ModelMeta):
             return None
 
     @classmethod
+    @timeit
     async def all(cls, db, order_by=None):
         """Return all object instances of this class that's in the db.
         """
@@ -274,6 +279,7 @@ class RedisModel(object, metaclass=ModelMeta):
                 if x is not None]
 
     @classmethod
+    @timeit
     async def filter_by(cls, db, **kwargs):
         """Query by attributes. Ordering is not supported
         Example:
