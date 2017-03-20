@@ -36,11 +36,6 @@ class TestFilterBy(BaseTestCase):
         users = self.loop.run_until_complete(TestUser.filter_by(self.db, status='active'))
         self.assertEqual(10, len(users))
 
-    def test_filter_by(self):
-        users = self.loop.run_until_complete(TestUser.filter_by(self.db, status='active', age=[1, 2]))
-        self.assertEqual(2, len(users))
-        users = self.loop.run_until_complete(TestUser.filter_by(self.db, status='active'))
-        self.assertEqual(10, len(users))
         user = users[0]
         user.status = 'inactive'
         self.loop.run_until_complete(user.save(self.db))
