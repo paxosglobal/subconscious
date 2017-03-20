@@ -1,2 +1,3 @@
 aioredis
 coverage
+flake8
