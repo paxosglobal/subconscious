@@ -46,4 +46,3 @@ class TestFilterBy(BaseTestCase):
     def test_get_by_none(self):
         users = self.loop.run_until_complete(TestUser.filter_by(self.db, name=None))
         self.assertEqual(1, len(users))
-
