@@ -3,8 +3,6 @@ import asyncio
 import inspect
 import logging
 
-from itertools import product
-
 from .column import Column
 
 
@@ -73,9 +71,14 @@ class ModelMeta(type):
                 [col for col in cls._columns if getattr(col, 'auto_increment', False)],
                 key=lambda c: c.name
             )
-            cls._queryable_colnames_set = set([col.name for col in cls._indexed_columns + cls._identifier_columns])
+            cls._queryable_colnames_set = set(
+                [col.name for col in cls._indexed_columns + cls._identifier_columns + cls._sortable_columns]
+            )
             cls._sortable_column_names = tuple([x.name for x in cls._sortable_columns])
             cls._auto_column_names = {col.name for col in cls._auto_columns}
+            cls._indexed_column_names = {col.name for col in cls._indexed_columns}
+            cls._columns_map = {c.name: c for c in cls._columns}
+            cls._identifier_column_names = tuple([x.name for x in cls._identifier_columns])
 
 
 class RedisModel(object, metaclass=ModelMeta):
@@ -172,42 +175,27 @@ class RedisModel(object, metaclass=ModelMeta):
     def __repr__(self):
         return "<{}>".format(self.redis_key())
 
-    def get_index_redis_key(self):
-        key_components = ['index', self.key_prefix()]
-        for column in self._indexed_columns:
-            key_components.append(str(getattr(self, column.name)))
-        return MODEL_NAME_ID_SEPARATOR.join(key_components)
-
     @classmethod
-    def get_sort_column_key(cls, column_name):
-        return 'sort{}{}{}{}'.format(MODEL_NAME_ID_SEPARATOR, cls.key_prefix(), MODEL_NAME_ID_SEPARATOR, column_name)
+    def get_index_key(cls, column_name):
+        return 'index{}{}{}{}'.format(MODEL_NAME_ID_SEPARATOR, cls.key_prefix(), MODEL_NAME_ID_SEPARATOR, column_name)
 
     async def save_index(self, db, stale_object=None):
-        current_index_redis_key = self.get_index_redis_key()
-        for sort_column in self._sortable_column_names:
-            if self.has_real_data(sort_column):
-                # Index it by adding to a sorted set with 0 score. It will be lexically sorted by redis
-                index_key = self.get_sort_column_key(sort_column)
-                if stale_object:
-                    stale_index_value = '{}{}{}'.format(
-                        getattr(stale_object, sort_column),
-                        VALUE_ID_SEPARATOR,
-                        stale_object.identifier()
-                    )
-                    await db.zrem(index_key, stale_index_value)
-                index_value = '{}{}{}'.format(
-                    getattr(self, sort_column),
+        for indexed_column in self._queryable_colnames_set:
+            index_key = self.get_index_key(indexed_column)
+            if stale_object:
+                stale_index_value = '{}{}{}'.format(
+                    getattr(stale_object, indexed_column),
                     VALUE_ID_SEPARATOR,
-                    self.identifier()
+                    stale_object.identifier()
                 )
-                await db.zadd(index_key, 0, index_value,)
-
-        await db.sadd(current_index_redis_key, self.identifier())
-        if stale_object:
-            stale_index_redis_key = stale_object.get_index_redis_key()
-            # update the index only if they're different
-            if stale_index_redis_key != current_index_redis_key:
-                await db.srem(stale_index_redis_key, self.identifier())
+                await db.zrem(index_key, stale_index_value)
+            index_value = '{}{}{}'.format(
+                getattr(self, indexed_column),
+                VALUE_ID_SEPARATOR,
+                self.identifier()
+            )
+            # Index it by adding to a sorted set with 0 score. It will be lexically sorted by redis
+            await db.zadd(index_key, 0, index_value,)
 
     async def save(self, db):
         """Save the object to Redis.
@@ -253,36 +241,30 @@ class RedisModel(object, metaclass=ModelMeta):
             return None
 
     @classmethod
-    async def all_keys(cls, db):
-        """Return all redis keys that are in the database for this class.
-        """
-        return await db.keys("{}{}*".format(cls.key_prefix(), MODEL_NAME_ID_SEPARATOR))
-
-    @classmethod
     async def all(cls, db, order_by=None):
         """Return all object instances of this class that's in the db.
         """
-        if order_by:
-            if order_by[0] in ['+', '-']:
-                direction, order_by = order_by[0], order_by[1:]
-            else:
-                direction = '+'
-            if order_by not in cls._sortable_column_names:
-                err_msg = 'order_by `{}` not in {}'.format(order_by, cls._sortable_column_names)
-                raise InvalidQuery(err_msg)
-            if direction == '+':
-                range_func = db.zrange
-            else:
-                range_func = db.zrevrange
-            all_keys = []
-            for index_entry in await range_func(cls.get_sort_column_key(order_by), 0, -1):
-                all_keys.append('{}{}{}'.format(
-                    cls.key_prefix(),
-                    MODEL_NAME_ID_SEPARATOR,
-                    index_entry.split(VALUE_ID_SEPARATOR)[-1])
-                )
+        if not order_by:
+            order_by = cls._identifier_column_names[0]
+        if order_by[0] in ['+', '-']:
+            direction, order_by = order_by[0], order_by[1:]
         else:
-            all_keys = await cls.all_keys(db)
+            direction = '+'
+        if order_by not in cls._queryable_colnames_set:
+            err_msg = 'order_by `{}` not in {}'.format(order_by, cls._queryable_colnames_set)
+            raise InvalidQuery(err_msg)
+        if direction == '+':
+            range_func = db.zrange
+        else:
+            range_func = db.zrevrange
+        all_keys = []
+        for index_entry in await range_func(cls.get_index_key(order_by), 0, -1):
+            all_keys.append('{}{}{}'.format(
+                cls.key_prefix(),
+                MODEL_NAME_ID_SEPARATOR,
+                index_entry.split(VALUE_ID_SEPARATOR)[-1])
+            )
+
         if not all_keys:
             return []
         futures = []
@@ -293,10 +275,12 @@ class RedisModel(object, metaclass=ModelMeta):
 
     @classmethod
     async def filter_by(cls, db, **kwargs):
-        """Return all object instances of this class that have
-        values at columns determined by kwargs
-        """
+        """Query by attributes. Ordering is not supported
+        Example:
+            User.get_by(db, age=[32, 54])
+            User.get_by(db, age=23, name="guido")
 
+        """
         # Assert that the lookup keys are part of indexed, pk or composite keys
         missing_cols_set = set(kwargs.keys()) - cls._queryable_colnames_set
         if missing_cols_set:
@@ -305,61 +289,28 @@ class RedisModel(object, metaclass=ModelMeta):
                 queryable_cols=cls._queryable_colnames_set,
             )
             raise InvalidQuery(err_msg)
+        result_set = set()
+        first_iteration = True
+        for k, v in kwargs.items():
+            if v is None:
+                v = cls._columns_map[k]
+            if isinstance(v, (list, tuple)):
+                values = [str(x) for x in v]
+            else:
+                values = (str(v),)
+            temp_set = set()
+            for value in values:
+                temp_set = temp_set.union({x.partition(VALUE_ID_SEPARATOR)[2] for x in await db.zrangebylex(
+                    cls.get_index_key(k),
+                    min='{}{}'.format(value, VALUE_ID_SEPARATOR).encode(),
+                    max='{}{}\xff'.format(value, VALUE_ID_SEPARATOR).encode())})
+            if first_iteration:
+                result_set = result_set.union(temp_set)
+                first_iteration = False
+            else:
+                result_set = result_set.intersection(temp_set)
+        futures = []
+        for key in sorted(result_set):
+            futures.append(cls.load(db, key))
 
-        # Check if PK is in the lookup field. If yes then do a load and return.
-        if cls._pk_name in kwargs:
-            entity = await cls.load(db, identifier=kwargs.get(cls._pk_name))
-            # Now match with the other fields supplied for lookup
-            for key, val in kwargs.items():
-                if key == cls._pk_name:
-                    continue
-                if type(val) == list:
-                    if getattr(entity, key) not in val:
-                        return []
-                elif getattr(entity, key) != val:
-                    return []
-            return [entity]
-
-        # Make list of unique entries. We need a list to do index ops below
-        in_clauses = list({x for x in kwargs.keys() if type(kwargs[x]) == list})
-        field_combinations = product(*[kwargs[x] for x in in_clauses])
-        index_keys_collection = []
-        for field_combo in field_combinations:
-            kwargs_copy = kwargs.copy()
-            # pop out in-clause fields first. They will be used to construct individual index lookup keys below.
-            [kwargs_copy.pop(x) for x in in_clauses]
-            # re-set in clause values one at a time.
-            for i, field in enumerate(field_combo):
-                kwargs_copy[in_clauses[i]] = field
-            key_components = ["index", cls.key_prefix()]
-            for column in cls._indexed_columns:
-                if column.name in kwargs_copy:
-                    if kwargs_copy[column.name] is None:
-                        # This is the way we are constructing index key in save()
-                        # when the indexed field value is None
-                        key_components.append(str(column))
-                    else:
-                        key_components.append(str(kwargs_copy[column.name]))  # Stringify field value
-                else:
-                    key_components.append('*')
-            index_keys_collection.append(MODEL_NAME_ID_SEPARATOR.join(key_components))
-
-        if not index_keys_collection:
-            key_components = ["index", cls.key_prefix()]
-            for column in cls._indexed_columns:
-                if column.name in kwargs:
-                    if kwargs[column.name] is None:
-                        # This is the way we are constructing index key in save() when the indexed field value is None
-                        key_components.append(str(column))
-                    else:
-                        key_components.append(str(kwargs[column.name]))  # Stringify field value
-                else:
-                    key_components.append('*')
-            index_keys_collection.append(MODEL_NAME_ID_SEPARATOR.join(key_components))
-
-        identifiers = []
-        for all_index_keys in index_keys_collection:
-            for index_redis_key in await db.keys(all_index_keys):
-                identifiers.extend(await db.smembers(index_redis_key))
-        futures = [cls.load(db, identifier=p) for p in sorted(identifiers)]
         return await asyncio.gather(*futures, loop=db.connection._loop)
