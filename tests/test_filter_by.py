@@ -46,3 +46,13 @@ class TestFilterBy(BaseTestCase):
     def test_get_by_none(self):
         users = self.loop.run_until_complete(TestUser.filter_by(self.db, name=None))
         self.assertEqual(1, len(users))
+
+    def test_filter_by_iterative(self):
+        async def test_loop():
+            count = 0
+            async for x in TestUser.filter_by_iter(self.db, status='active'):
+                count += 1
+                self.assertEqual(x.status, 'active')
+            self.assertEqual(count, 10)
+
+        self.loop.run_until_complete(test_loop())
