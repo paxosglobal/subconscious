@@ -16,6 +16,11 @@ class TestUser(RedisModel):
     status = Column(type=str, enum=StatusEnum)
 
 
+class TestItem(RedisModel):
+    id = Column(primary_key=True)
+    name = Column(index=True, sort=True)
+
+
 class TestAll(BaseTestCase):
 
     def setUp(self):
@@ -91,15 +96,8 @@ class TestAll(BaseTestCase):
 
     def test_all_iter_empty(self):
 
-        class TestItem(RedisModel):
-            id = Column(primary_key=True)
-            name = Column(index=True, sort=True)
+        results = self.loop.run_until_complete(
+            TestItem.all_iter(db=self.db, order_by='name')
+        )
 
-        async def _test_loop():
-            names_in_expected_order = []
-            count = 0
-            async for x in TestItem.all_iter(db=self.db, order_by='name'):
-                self.assertEqual(x.name, names_in_expected_order[count])
-                count += 1
-
-        self.loop.run_until_complete(_test_loop())
+        self.assertEqual(results, [])

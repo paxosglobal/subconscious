@@ -282,6 +282,7 @@ class RedisModel(object, metaclass=ModelMeta):
     async def all_iter(cls, db, order_by=None):
         for redis_key in await cls._get_ids_for_all(db, order_by=order_by):
             yield await cls.load(db, redis_key=redis_key)
+        return []
 
     @classmethod
     async def _get_ids_filter_by(cls, db, **kwargs):
