@@ -329,7 +329,7 @@ class RedisModel(object, metaclass=ModelMeta):
 
     @classmethod
     async def filter_by_iter(cls, db, **kwargs):
-        """Query by attributes. Ordering is not supported
+        """Query by attributes iteratively. Ordering is not supported
         Example:
             User.get_by(db, age=[32, 54])
             User.get_by(db, age=23, name="guido")
