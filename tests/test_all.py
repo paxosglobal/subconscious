@@ -88,3 +88,18 @@ class TestAll(BaseTestCase):
                 count += 1
 
         self.loop.run_until_complete(_test_loop())
+
+    def test_all_iter_empty(self):
+
+        class TestItem(RedisModel):
+            id = Column(primary_key=True)
+            name = Column(index=True, sort=True)
+
+        async def _test_loop():
+            names_in_expected_order = []
+            count = 0
+            async for x in TestItem.all_iter(db=self.db, order_by='name'):
+                self.assertEqual(x.name, names_in_expected_order[count])
+                count += 1
+
+        self.loop.run_until_complete(_test_loop())
