@@ -80,11 +80,13 @@ class TestAll(BaseTestCase):
 
     def test_all_iter(self):
         names_in_expected_order = ['Test name', 'Test name2', 'ZTest name']
-
+        ressult_array = []
         async def _test_loop():
             count = 0
             async for x in TestUser.all_iter(db=self.db, order_by='name'):
                 self.assertEqual(x.name, names_in_expected_order[count])
                 count += 1
+                ressult_array.append(x.name)
+            self.assertEqual(names_in_expected_order, ressult_array)
 
         self.loop.run_until_complete(_test_loop())
