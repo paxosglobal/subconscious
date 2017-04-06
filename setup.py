@@ -11,5 +11,5 @@ setup(
     author='paxosdev',
     author_email='',
     description='',
-    install_requires=['aioredis']
+    install_requires=['aioredis', 'python>=3.6']
 )

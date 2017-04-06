@@ -1,5 +1,4 @@
 # python modules
-import asyncio
 import inspect
 import logging
 
@@ -241,9 +240,7 @@ class RedisModel(object, metaclass=ModelMeta):
             return None
 
     @classmethod
-    async def all(cls, db, order_by=None):
-        """Return all object instances of this class that's in the db.
-        """
+    async def _get_ids_for_all(cls, db, order_by):
         if not order_by:
             order_by = cls._identifier_column_names[0]
         if order_by[0] in ['+', '-']:
@@ -264,24 +261,15 @@ class RedisModel(object, metaclass=ModelMeta):
                 MODEL_NAME_ID_SEPARATOR,
                 index_entry.split(VALUE_ID_SEPARATOR)[-1])
             )
-
-        if not all_keys:
-            return []
-        futures = []
-        for redis_key in all_keys:
-            futures.append(cls.load(db, redis_key=redis_key))
-        return [x for x in await asyncio.gather(*futures, loop=db.connection._loop)
-                if x is not None]
+        return all_keys
 
     @classmethod
-    async def filter_by(cls, db, **kwargs):
-        """Query by attributes. Ordering is not supported
-        Example:
-            User.get_by(db, age=[32, 54])
-            User.get_by(db, age=23, name="guido")
+    async def all(cls, db, order_by=None):
+        for redis_key in await cls._get_ids_for_all(db, order_by=order_by):
+            yield await cls.load(db, redis_key=redis_key)
 
-        """
-        # Assert that the lookup keys are part of indexed, pk or composite keys
+    @classmethod
+    async def _get_ids_filter_by(cls, db, **kwargs):
         missing_cols_set = set(kwargs.keys()) - cls._queryable_colnames_set
         if missing_cols_set:
             err_msg = '{missing_cols_set} not in {queryable_cols}'.format(
@@ -309,8 +297,26 @@ class RedisModel(object, metaclass=ModelMeta):
                 first_iteration = False
             else:
                 result_set = result_set.intersection(temp_set)
-        futures = []
-        for key in sorted(result_set):
-            futures.append(cls.load(db, key))
+        return sorted(result_set)
 
-        return await asyncio.gather(*futures, loop=db.connection._loop)
+    @classmethod
+    async def filter_by(cls, db, **kwargs):
+        """Query by attributes iteratively. Ordering is not supported
+        Example:
+            User.get_by(db, age=[32, 54])
+            User.get_by(db, age=23, name="guido")
+
+        """
+        for key in await cls._get_ids_filter_by(db, **kwargs):
+            yield await cls.load(db, key)
+
+    @classmethod
+    async def get_object_or_none(cls, db, **kwargs):
+        """
+        Returns the first object exists for this query or None.
+        WARNING: if there are more than 1 results in cls that satisfy the conditions in kwargs,
+        only 1 random result will be returned
+        """
+        for key in await cls._get_ids_filter_by(db, **kwargs):
+            return await cls.load(db, key)
+        return None

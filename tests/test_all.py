@@ -37,43 +37,62 @@ class TestAll(BaseTestCase):
 
     def test_all(self):
         async def _test_all():
-            for x in await TestUser.all(db=self.db):
+            async for x in TestUser.all(db=self.db):
                 self.assertEqual(type(x), TestUser)
                 self.assertTrue(x.name in ('Test name', 'ZTest name', 'Test name2'))
                 self.assertTrue(x.age in (100, 53))
         self.loop.run_until_complete(_test_all())
 
     def test_all_with_order(self):
-        users = self.loop.run_until_complete(TestUser.all(db=self.db, order_by='name'))
-        self.assertEqual('Test name', users[0].name)
-        self.assertEqual('Test name2', users[1].name)
-        self.assertEqual('ZTest name', users[2].name)
+        async def _test():
 
-        users = self.loop.run_until_complete(TestUser.all(db=self.db, order_by='-name'))
-        self.assertEqual('ZTest name', users[0].name)
-        self.assertEqual('Test name2', users[1].name)
-        self.assertEqual('Test name', users[2].name)
+            expected_in_order = ['Test name', 'Test name2', 'ZTest name']
+            result_list = []
+            async for x in TestUser.all(db=self.db, order_by='name'):
+                result_list.append(x.name)
+            self.assertEqual(result_list, expected_in_order)
 
-        # update a record to force sort order change
-        user = users[0]
-        user.name = 'AATest name'
-        self.loop.run_until_complete(user.save(self.db))
-        users = self.loop.run_until_complete(TestUser.all(db=self.db, order_by='name'))
-        self.assertEqual('AATest name', users[0].name)
-        self.assertEqual('Test name', users[1].name)
-        self.assertEqual('Test name2', users[2].name)
+            expected_in_order.sort(reverse=True)
+            result_list = []
+            async for x in TestUser.all(db=self.db, order_by='-name'):
+                result_list.append(x)
+            self.assertEqual([x.name for x in result_list], expected_in_order)
+
+            # update a record to force sort order change
+            result_list[0].name = 'AATest name'
+            await result_list[0].save(self.db)
+            result_list = []
+            expected_in_order = ['AATest name', 'Test name', 'Test name2']
+            async for x in TestUser.all(db=self.db, order_by='name'):
+                result_list.append(x)
+            self.assertEqual([x.name for x in result_list], expected_in_order)
+
+        self.loop.run_until_complete(_test())
 
     def test_filter_by_non_existing_fields_should_fail(self):
+        async def _test():
+            async for x in TestUser.filter_by(db=self.db, non_existing1='dummy', non_existing2=1):
+                assert x  # Just to satisfy flake8
         with self.assertRaises(InvalidQuery):
-            self.loop.run_until_complete(TestUser.filter_by(
-                db=self.db,
-                non_existing1='dummy',
-                non_existing2=1
-            ))
+            self.loop.run_until_complete(_test())
 
     def test_filter_by_non_indexed_field_should_fail(self):
+        async def _test():
+            async for x in TestUser.filter_by(db=self.db, status='active',):
+                assert x  # Just to satisfy flake8
         with self.assertRaises(InvalidQuery):
-            self.loop.run_until_complete(TestUser.filter_by(
-                db=self.db,
-                status='active',
-            ))
+            self.loop.run_until_complete(_test())
+
+    def test_all_iter(self):
+        names_in_expected_order = ['Test name', 'Test name2', 'ZTest name']
+        result_array = []
+
+        async def _test_loop():
+            count = 0
+            async for x in TestUser.all(db=self.db, order_by='name'):
+                self.assertEqual(x.name, names_in_expected_order[count])
+                count += 1
+                result_array.append(x.name)
+            self.assertEqual(names_in_expected_order, result_array)
+
+        self.loop.run_until_complete(_test_loop())
