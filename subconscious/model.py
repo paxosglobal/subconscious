@@ -313,7 +313,9 @@ class RedisModel(object, metaclass=ModelMeta):
     @classmethod
     async def get_object_or_none(cls, db, **kwargs):
         """
-        Returns the first object exists for this query or None
+        Returns the first object exists for this query or None.
+        WARNING: if there are more than 1 results in cls that satisfy the conditions in kwargs,
+        only 1 random result will be returned
         """
         for key in await cls._get_ids_filter_by(db, **kwargs):
             return await cls.load(db, key)
