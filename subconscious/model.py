@@ -1,5 +1,4 @@
 # python modules
-import asyncio
 import inspect
 import logging
 
@@ -266,20 +265,6 @@ class RedisModel(object, metaclass=ModelMeta):
 
     @classmethod
     async def all(cls, db, order_by=None):
-        """Return all object instances of this class that's in the db.
-        """
-        all_keys = await cls._get_ids_for_all(db, order_by=order_by)
-
-        if not all_keys:
-            return []
-        futures = []
-        for redis_key in all_keys:
-            futures.append(cls.load(db, redis_key=redis_key))
-        return [x for x in await asyncio.gather(*futures, loop=db.connection._loop)
-                if x is not None]
-
-    @classmethod
-    async def all_iter(cls, db, order_by=None):
         for redis_key in await cls._get_ids_for_all(db, order_by=order_by):
             yield await cls.load(db, redis_key=redis_key)
 
@@ -316,19 +301,6 @@ class RedisModel(object, metaclass=ModelMeta):
 
     @classmethod
     async def filter_by(cls, db, **kwargs):
-        """Query by attributes. Ordering is not supported
-        Example:
-            User.get_by(db, age=[32, 54])
-            User.get_by(db, age=23, name="guido")
-
-        """
-        futures = []
-        for key in await cls._get_ids_filter_by(db, **kwargs):
-            futures.append(cls.load(db, key))
-        return await asyncio.gather(*futures, loop=db.connection._loop)
-
-    @classmethod
-    async def filter_by_iter(cls, db, **kwargs):
         """Query by attributes iteratively. Ordering is not supported
         Example:
             User.get_by(db, age=[32, 54])
@@ -337,3 +309,12 @@ class RedisModel(object, metaclass=ModelMeta):
         """
         for key in await cls._get_ids_filter_by(db, **kwargs):
             yield await cls.load(db, key)
+
+    @classmethod
+    async def get_object_or_none(cls, db, **kwargs):
+        """
+        Returns the first object exists for this query or None
+        """
+        for key in await cls._get_ids_filter_by(db, **kwargs):
+            return await cls.load(db, key)
+        return None

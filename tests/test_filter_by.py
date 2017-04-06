@@ -27,32 +27,40 @@ class TestFilterBy(BaseTestCase):
             self.loop.run_until_complete(user.save(self.db))
 
     def test_filter_by(self):
-        users = self.loop.run_until_complete(TestUser.filter_by(self.db, age=1))
-        self.assertEqual(1, len(users))
-
-        users = self.loop.run_until_complete(TestUser.filter_by(self.db, age=[1, 2]))
-        self.assertEqual(2, len(users))
-
-        users = self.loop.run_until_complete(TestUser.filter_by(self.db, status='active'))
-        self.assertEqual(10, len(users))
-
-        user = users[0]
-        user.status = 'inactive'
-        self.loop.run_until_complete(user.save(self.db))
-        users = self.loop.run_until_complete(TestUser.filter_by(self.db, status='active'))
-        # Should be one less now. 10 - 1 = 9
-        self.assertEqual(9, len(users))
-
-    def test_get_by_none(self):
-        users = self.loop.run_until_complete(TestUser.filter_by(self.db, name=None))
-        self.assertEqual(1, len(users))
-
-    def test_filter_by_iterative(self):
-        async def test_loop():
+        async def _test():
             count = 0
-            async for x in TestUser.filter_by_iter(self.db, status='active'):
+            async for x in TestUser.filter_by(self.db, age=1):
+                count += 1
+            self.assertEqual(1, count)
+
+            count = 0
+            async for x in TestUser.filter_by(self.db, age=[1, 2]):
+                count += 1
+            self.assertEqual(2, count)
+
+            count = 0
+            result_list = []
+            async for x in TestUser.filter_by(self.db, status='active'):
                 count += 1
                 self.assertEqual(x.status, 'active')
-            self.assertEqual(count, 10)
+                result_list.append(x)
+            self.assertEqual(10, count)
+            result_list[0].status = 'inactive'
+            await result_list[0].save(self.db)
 
-        self.loop.run_until_complete(test_loop())
+            count = 0
+            async for x in TestUser.filter_by(self.db, status='active'):
+                count += 1
+                self.assertEqual(x.status, 'active')
+            # Should be one less now
+            self.assertEqual(9, count)
+
+        self.loop.run_until_complete(_test())
+
+    def test_get_by_none(self):
+        async def _test():
+            result_list = []
+            async for x in TestUser.filter_by(self.db, name=None):
+                result_list.append(x)
+            self.assertEqual(1, len(result_list))
+        self.loop.run_until_complete(_test())
