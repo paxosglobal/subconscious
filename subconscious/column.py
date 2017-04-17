@@ -1,4 +1,5 @@
-# python modules
+#!/usr/bin/env python3
+
 from enum import EnumMeta
 
 

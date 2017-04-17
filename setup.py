@@ -1,15 +1,21 @@
-from distutils.core import setup
-import subconscious
+#!/usr/bin/env python3
+
+from setuptools import setup, find_packages
+
 
 setup(
     name='subconscious',
-    version=subconscious.__version__,
-    packages=['subconscious',
-              ],
-    url='',
-    license='',
-    author='paxosdev',
-    author_email='',
-    description='',
-    install_requires=['aioredis', 'python>=3.6']
+    version='0.08.1',
+    packages=find_packages(),
+    url='https://github.com/paxos-bankchain/subconscious',
+    license='MIT',
+    author='Paxos Trust Company, LLC',
+    author_email='pypi@paxos.com',
+    description='redis-backed db for python3 (asyncio compatible)',
+    install_requires=['aioredis'],
+    classifiers=[
+        'License :: OSI Approved :: MIT License',
+        # async_generator requires python3.6+
+        'Programming Language :: Python :: 3.6',
+    ],
 )
