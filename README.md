@@ -1,15 +1,23 @@
 # subconscious
 
-in-memory database for python3 only
+In-memory database for python3.6+ only
 
 [![Build Status](https://travis-ci.com/paxos-bankchain/subconscious.svg?branch=master)](https://travis-ci.com/paxos-bankchain/subconscious)
 
 *Install*
 
-pip install git+https://github.com/paxos-bankchain/subconscious.git
+From [PyPi](https://pypi.python.org/pypi/subconscious):
+```bash
+$ pip3 install subconscious
+```
 
-# TODO: pypi support
+From [GitHub](https://github.com/paxos-bankchain/dsert/):
+```bash
+$ pip3 install git+https://github.com/paxos-bankchain/subconscious.git
+```
 
+## Examples
+See our demo app for a complete example: https://github.com/paxos-bankchain/pastey
 
 *Contributing*
 
@@ -30,3 +38,48 @@ $ nosetests .
 (this requires having [nose](http://nose.readthedocs.io/en/latest/]) installed)
 
 Make some changes and confirm that tests still pass
+
+## Updating PyPi
+
+You must have the credentials in order to push updates to [PyPi](https://pypi.python.org/pypi).
+
+Create a `.pypirc` file in your home directory:
+```
+$ cat ~/.pypirc
+[distutils]
+index-servers=
+    pypi
+
+[pypi]
+repository = https://pypi.python.org/pypi
+username = paxos
+password = <password goes here>
+```
+
+Install twine:
+```
+$ pip3 install twine
+```
+
+Create a distribution:
+```
+$ python setup.py sdist bdist_wheel
+```
+
+Push your distribution to PyPi:
+```
+$ twine upload dist/* -r pypi
+```
+
+To test this process, you can use [PyPi's test server](https://testpypi.python.org/). Add an entry to `.pypirc` that looks like this with whatever creds you create for testpypi:
+```
+[testpypi]
+repository = https://testpypi.python.org/pypi
+username = <your user name goes here>
+password = <your password goes here>
+```
+
+Then use the following command to push your distrobution to test PyPi:
+```
+$ twine upload dist/* -r testpypi
+```
