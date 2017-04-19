@@ -265,8 +265,19 @@ class RedisModel(object, metaclass=ModelMeta):
         return all_keys
 
     @classmethod
-    async def all(cls, db, order_by=None):
-        for redis_key in await cls._get_ids_for_all(db, order_by=order_by):
+    async def all(cls, db, order_by=None, limit=None, offset=None):
+        ids_to_iterate = await cls._get_ids_for_all(db, order_by=order_by)
+        if order_by:
+            assert limit is None or type(limit) is int
+            assert offset is None or type(offset) is int
+            if limit and offset:
+                ids_to_iterate = ids_to_iterate[offset:offset+limit]
+            elif limit and not offset:
+                ids_to_iterate = ids_to_iterate[:limit]
+            elif not limit and offset:
+                ids_to_iterate = ids_to_iterate[offset:]
+
+        for redis_key in ids_to_iterate:
             yield await cls.load(db, redis_key=redis_key)
 
     @classmethod

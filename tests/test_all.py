@@ -96,3 +96,46 @@ class TestAll(BaseTestCase):
             self.assertEqual(names_in_expected_order, result_array)
 
         self.loop.run_until_complete(_test_loop())
+
+
+class TestAllLimitOffset(TestAll):
+
+    def test_limit_only(self):
+        async def _test():
+            result_array = []
+            async for x in TestUser.all(db=self.db, order_by='name', limit=1):
+                result_array.append(x.name)
+            self.assertEqual(result_array, ['Test name'])
+        self.loop.run_until_complete(_test())
+
+    def test_limit_and_offset(self):
+        async def _test():
+            result_array = []
+            async for x in TestUser.all(db=self.db, order_by='name', limit=1, offset=1):
+                result_array.append(x.name)
+            self.assertEqual(result_array, ['Test name2'])
+        self.loop.run_until_complete(_test())
+
+    def test_offset_only(self):
+        async def _test():
+            result_array = []
+            async for x in TestUser.all(db=self.db, order_by='name', offset=1):
+                result_array.append(x.name)
+            self.assertEqual(result_array, ['Test name2', 'ZTest name'])
+        self.loop.run_until_complete(_test())
+
+    def test_over_offset(self):
+        async def _test():
+            result_array = []
+            async for x in TestUser.all(db=self.db, order_by='name', offset=999):
+                result_array.append(x.name)
+            self.assertEqual(result_array, [])
+        self.loop.run_until_complete(_test())
+
+    def test_nonbinding_limit(self):
+        async def _test():
+            result_array = []
+            async for x in TestUser.all(db=self.db, order_by='name', limit=999):
+                result_array.append(x.name)
+            self.assertEqual(result_array, ['Test name', 'Test name2', 'ZTest name'])
+        self.loop.run_until_complete(_test())
