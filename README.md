@@ -4,7 +4,7 @@ In-memory database for python3.6+ only
 
 [![Build Status](https://travis-ci.com/paxos-bankchain/subconscious.svg?branch=master)](https://travis-ci.com/paxos-bankchain/subconscious)
 
-*Install*
+## Install
 
 From [PyPi](https://pypi.python.org/pypi/subconscious):
 ```bash
@@ -19,7 +19,25 @@ $ pip3 install git+https://github.com/paxos-bankchain/subconscious.git
 ## Examples
 See our demo app for a complete example: https://github.com/paxos-bankchain/pastey
 
-*Contributing*
+## Test
+
+Run redis. We recommend using [docker](https://www.docker.com/community-edition):
+```bash
+$  docker run -p 6379:6379 redis
+```
+(you can use `-d` to daemonize this process)
+
+Instll [nose](http://nose.readthedocs.io/en/latest/]):
+```bash
+$ pip3 install nose
+```
+
+Confirm tests pass:
+```
+$ nosetests .
+```
+
+## Contribute
 
 Check out repo:
 ```bash
@@ -31,13 +49,9 @@ Install locally
 pip3 install --editable
 ```
 
-Confirm tests pass:
-```
-$ nosetests .
-```
-(this requires having [nose](http://nose.readthedocs.io/en/latest/]) installed)
-
 Make some changes and confirm that tests still pass
+
+---
 
 ## Updating PyPi
 
