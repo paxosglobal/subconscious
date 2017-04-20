@@ -2,7 +2,7 @@
 
 In-memory database for python3.6+ only
 
-[![Build Status](https://travis-ci.com/paxos-bankchain/subconscious.svg?branch=master)](https://travis-ci.com/paxos-bankchain/subconscious)
+[![Build Status](https://api.travis-ci.com/paxos-bankchain/subconscious.svg?token=PA4epyQZ24dEsEEpEEEZ&branch=develop)](https://travis-ci.com/paxos-bankchain/subconscious)
 
 ## Install
 
@@ -11,13 +11,73 @@ From [PyPi](https://pypi.python.org/pypi/subconscious):
 $ pip3 install subconscious
 ```
 
-From [GitHub](https://github.com/paxos-bankchain/dsert/):
-```bash
-$ pip3 install git+https://github.com/paxos-bankchain/subconscious.git
+## Quickstart
+
+Let's say you have the following in your `models.py` file:
+```python
+from enum import Enum
+from subconscious import RedisModel
+
+class User(RedisModel):
+
+    # This can be defined inside this class (easier imports) or elsewhere
+    class Gender(Enum):
+        MALE = 'male'
+        FEMALE = 'female'
+
+    uuid = Column(type=str, primary_key=True)
+    name = Column(type=str, required=True)
+    age = Column(index=True, type=int, sort=True, required=True)
+    gender = Column(index=True, enum=Gender)
+    country_code = Column(index=True)
 ```
 
-## Examples
-See our demo app for a complete example: https://github.com/paxos-bankchain/pastey
+Then somewhere else you can use that model:
+```bash
+from aioredis import create_redis
+from asyncio import get_event_loop
+from models import User
+
+loop = get_event_loop()
+
+async def go():
+    db = await create_redis(('localhost', 6379), loop=loop)
+    my_user = User(
+        uuid=str(uuid4()),
+        name='John Doe',
+        age=30,
+        gender=User.Gender.MALE,
+        country_code='USA',
+    )
+    print('Saving user with uuid {}...'.format(my_user.uuid))
+    await User.save(db)
+    retrieved_user = await User.load(db, my_user.uuid)
+    print('Retrieved {}'.format(retrieved_user.as_dict()))
+
+loop.run_until_complete(go())
+```
+
+You can also do advanced queries like this:
+```python
+users = await User.filter_by(
+    db=db,
+    age=[18, 19, 20, 21, 22],
+    country_code='USA',
+    gender=Gender.MALE,
+)
+```
+
+Or use an async generator like this:
+```python
+[async for user in await User.all(
+    db=db,
+    order_by='age',  # you can also do '-age' for reverse sort
+    limit=10,
+)]
+```
+
+## More Examples
+See our demo app for a live example: https://github.com/paxos-bankchain/pastey
 
 ## Test
 
@@ -57,6 +117,7 @@ Make some changes and confirm that tests still pass
 
 You must have the credentials in order to push updates to [PyPi](https://pypi.python.org/pypi).
 
+### Do it Live
 Create a `.pypirc` file in your home directory:
 ```
 $ cat ~/.pypirc
@@ -70,20 +131,17 @@ username = paxos
 password = <password goes here>
 ```
 
-Install twine:
-```
-$ pip3 install twine
-```
-
 Create a distribution:
 ```
 $ python setup.py sdist bdist_wheel
 ```
 
-Push your distribution to PyPi:
+Push your distribution to PyPi (may need to `pip3 install twine` first):
 ```
 $ twine upload dist/* -r pypi
 ```
+
+### Testing
 
 To test this process, you can use [PyPi's test server](https://testpypi.python.org/). Add an entry to `.pypirc` that looks like this with whatever creds you create for testpypi:
 ```

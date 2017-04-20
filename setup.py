@@ -5,7 +5,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='subconscious',
-    version='0.08.2',
+    version='0.08.3',
     packages=find_packages(),
     url='https://github.com/paxos-bankchain/subconscious',
     license='MIT',
