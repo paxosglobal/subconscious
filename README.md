@@ -16,7 +16,8 @@ $ pip3 install subconscious
 Let's say you have the following in your `models.py` file:
 ```python
 from enum import Enum
-from subconscious import RedisModel
+from subconscious.model import RedisModel
+from subconscious.column import Column
 
 class User(RedisModel):
 
@@ -32,29 +33,37 @@ class User(RedisModel):
     country_code = Column(index=True)
 ```
 
-Then somewhere else you can use that model:
-```bash
+Then somewhere you can use that model like this:
+```python
 from aioredis import create_redis
 from asyncio import get_event_loop
 from models import User
+from uuid import uuid4
 
 loop = get_event_loop()
 
 async def go():
-    db = await create_redis(('localhost', 6379), loop=loop)
+    db = await create_redis(('localhost', 6379), loop=loop, encoding='utf-8')
+    my_uuid = str(uuid4())
     my_user = User(
-        uuid=str(uuid4()),
+        uuid=my_uuid,
         name='John Doe',
         age=30,
-        gender=User.Gender.MALE,
+        gender=User.Gender.MALE.value,
         country_code='USA',
     )
-    print('Saving user with uuid {}...'.format(my_user.uuid))
-    await User.save(db)
-    retrieved_user = await User.load(db, my_user.uuid)
+    print('Saving user with uuid {}...'.format(my_uuid))
+    await my_user.save(db)
+    retrieved_user = await User.load(db, my_uuid)
     print('Retrieved {}'.format(retrieved_user.as_dict()))
 
 loop.run_until_complete(go())
+```
+
+Which results in:
+```
+Saving user with uuid 153d68ff-2897-4385-af0c-fea986a68d1f...
+Retrieved {'age': 30, 'country_code': 'USA', 'gender': 'male', 'name': 'John Doe', 'uuid': '153d68ff-2897-4385-af0c-fea986a68d1f'}
 ```
 
 You can also do advanced queries like this:
@@ -63,7 +72,7 @@ users = await User.filter_by(
     db=db,
     age=[18, 19, 20, 21, 22],
     country_code='USA',
-    gender=Gender.MALE,
+    gender=User.Gender.MALE,
 )
 ```
 
