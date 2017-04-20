@@ -266,16 +266,20 @@ class RedisModel(object, metaclass=ModelMeta):
 
     @classmethod
     async def all(cls, db, order_by=None, limit=None, offset=None):
+        if limit and type(limit) is not int:
+            raise InvalidQuery('If limit is supplied it must be an int')
+        if offset and type(offset) is not int:
+            raise InvalidQuery('If offset is supplied it must be an int')
+
         ids_to_iterate = await cls._get_ids_for_all(db, order_by=order_by)
-        if order_by:
-            assert limit is None or type(limit) is int
-            assert offset is None or type(offset) is int
-            if limit and offset:
+        if offset:
+            # Using offset without order_by is pretty strange, but allowed
+            if limit:
                 ids_to_iterate = ids_to_iterate[offset:offset+limit]
-            elif limit and not offset:
-                ids_to_iterate = ids_to_iterate[:limit]
-            elif not limit and offset:
+            else:
                 ids_to_iterate = ids_to_iterate[offset:]
+        elif limit:
+            ids_to_iterate = ids_to_iterate[:limit]
 
         for redis_key in ids_to_iterate:
             yield await cls.load(db, redis_key=redis_key)
