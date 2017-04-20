@@ -30,7 +30,7 @@ class User(RedisModel):
     name = Column(type=str, required=True)
     age = Column(index=True, type=int, sort=True, required=True)
     gender = Column(index=True, enum=Gender)
-    country_code = Column(index=True)
+    country_code = Column(type=str, index=True)
 ```
 
 Then somewhere you can use that model like this:
