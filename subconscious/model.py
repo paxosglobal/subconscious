@@ -4,6 +4,7 @@ import inspect
 import logging
 
 from .column import Column
+from .query import Query
 
 
 logger = logging.getLogger(__name__)
@@ -336,3 +337,7 @@ class RedisModel(object, metaclass=ModelMeta):
         for key in await cls._get_ids_filter_by(db, **kwargs):
             return await cls.load(db, key)
         return None
+
+    @classmethod
+    def query(cls, db) -> Query:
+        return Query(model=cls, db=db)
