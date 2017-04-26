@@ -17,21 +17,6 @@ class TestUser(RedisModel):
     status = Column(type=str, enum=StatusEnum, index=True)
 
 
-class TestIter(object):
-
-    def __init__(self, db):
-        self.db = db
-
-    def __aiter__(self):
-        self.gen = TestUser.all(db=self.db)
-        return self
-
-    async def __anext__(self):
-        async for x in self.gen:
-            return x
-        raise StopAsyncIteration()
-
-
 class TestFilterBy(BaseTestCase):
     def setUp(self):
         super(TestFilterBy, self).setUp()

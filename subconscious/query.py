@@ -9,8 +9,10 @@ class Query(object):
         return self
 
     def __aiter__(self):
-        self.result_set = self._model.filter_by(db=self._db, **self._filter) \
-            if self._filter else self._model.all(db=self._db)
+        if self._filter:
+            self.result_set = self._model.filter_by(db=self._db, **self._filter)
+        else:
+            self.result_set = self._model.all(db=self._db)
         return self
 
     async def __anext__(self):
