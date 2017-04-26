@@ -17,6 +17,21 @@ class TestUser(RedisModel):
     status = Column(type=str, enum=StatusEnum, index=True)
 
 
+class TestIter(object):
+
+    def __init__(self, db):
+        self.db = db
+
+    def __aiter__(self):
+        self.gen = TestUser.all(db=self.db)
+        return self
+
+    async def __anext__(self):
+        async for x in self.gen:
+            return x
+        raise StopAsyncIteration()
+
+
 class TestFilterBy(BaseTestCase):
     def setUp(self):
         super(TestFilterBy, self).setUp()
@@ -68,7 +83,7 @@ class TestFilterBy(BaseTestCase):
     def test_query(self):
         async def _test():
             result_list = []
-            async for x in TestUser.query(db=self.db).filter(status='active').execute():
+            async for x in TestUser.query(db=self.db).filter(status='active'):
                 result_list.append(x)
             self.assertEqual(10, len(result_list))
         self.loop.run_until_complete(_test())
@@ -76,7 +91,7 @@ class TestFilterBy(BaseTestCase):
     def test_query_no_filter(self):
         async def _test():
             result_list = []
-            async for x in TestUser.query(db=self.db).execute():
+            async for x in TestUser.query(db=self.db):
                 result_list.append(x)
             self.assertEqual(10, len(result_list))
         self.loop.run_until_complete(_test())
