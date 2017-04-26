@@ -64,3 +64,41 @@ class TestFilterBy(BaseTestCase):
                 result_list.append(x)
             self.assertEqual(1, len(result_list))
         self.loop.run_until_complete(_test())
+
+    def test_query(self):
+        async def _test():
+            result_list = []
+            async for x in TestUser.query(db=self.db).filter(status='active'):
+                result_list.append(x)
+            self.assertEqual(10, len(result_list))
+        self.loop.run_until_complete(_test())
+
+    def test_query_no_filter(self):
+        async def _test():
+            result_list = []
+            async for x in TestUser.query(db=self.db):
+                result_list.append(x)
+            self.assertEqual(10, len(result_list))
+        self.loop.run_until_complete(_test())
+
+    def test_query_first(self):
+        async def _test():
+            user = await TestUser.query(db=self.db).filter(status='active').first()
+            self.assertEqual(TestUser, type(user))
+            self.assertEqual(user.status, 'active')
+        self.loop.run_until_complete(_test())
+
+    def test_query_first_no_filter(self):
+        async def _test():
+            user = await TestUser.query(db=self.db).first()
+            self.assertEqual(TestUser, type(user))
+            self.assertEqual(user.status, 'active')
+        self.loop.run_until_complete(_test())
+
+    def test_query_chaining_filters(self):
+        async def _test():
+            user = await TestUser.query(db=self.db).filter(name='name-1').filter(status='active').first()
+            self.assertEqual(TestUser, type(user))
+            self.assertEqual(user.status, 'active')
+            self.assertEqual(user.name, 'name-1')
+        self.loop.run_until_complete(_test())
