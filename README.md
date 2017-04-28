@@ -96,7 +96,7 @@ $  docker run -p 6379:6379 redis
 ```
 (you can use `-d` to daemonize this process)
 
-Instll [nose](http://nose.readthedocs.io/en/latest/]):
+Install [nose](http://nose.readthedocs.io/en/latest/]):
 ```bash
 $ pip3 install nose
 ```
