@@ -78,7 +78,7 @@ users = await User.filter_by(
 
 Or use an async generator like this:
 ```python
-[user async user user in User.all(
+[user async for user in User.all(
     db=db,
     order_by='age',  # you can also do '-age' for reverse sort
     limit=10,
