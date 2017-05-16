@@ -2,6 +2,7 @@
 
 import inspect
 import logging
+import uuid
 
 from .column import Column
 from .query import Query
@@ -242,51 +243,53 @@ class RedisModel(object, metaclass=ModelMeta):
             return None
 
     @classmethod
-    async def _get_ids_for_all(cls, db, order_by):
-        if not order_by:
-            order_by = cls._identifier_column_names[0]
-        if order_by[0] in ['+', '-']:
-            direction, order_by = order_by[0], order_by[1:]
-        else:
-            direction = '+'
-        if order_by not in cls._queryable_colnames_set:
-            err_msg = 'order_by `{}` not in {}'.format(order_by, cls._queryable_colnames_set)
-            raise InvalidQuery(err_msg)
-        if direction == '+':
-            range_func = db.zrange
-        else:
-            range_func = db.zrevrange
-        all_keys = []
-        for index_entry in await range_func(cls.get_index_key(order_by), 0, -1):
-            all_keys.append('{}{}{}'.format(
-                cls.key_prefix(),
-                MODEL_NAME_ID_SEPARATOR,
-                index_entry.split(VALUE_ID_SEPARATOR)[-1])
-            )
-        return all_keys
-
-    @classmethod
     async def all(cls, db, order_by=None, limit=None, offset=None):
-        if limit and type(limit) is not int:
-            raise InvalidQuery('If limit is supplied it must be an int')
-        if offset and type(offset) is not int:
-            raise InvalidQuery('If offset is supplied it must be an int')
-
-        ids_to_iterate = await cls._get_ids_for_all(db, order_by=order_by)
-        if offset:
-            # Using offset without order_by is pretty strange, but allowed
-            if limit:
-                ids_to_iterate = ids_to_iterate[offset:offset+limit]
-            else:
-                ids_to_iterate = ids_to_iterate[offset:]
-        elif limit:
-            ids_to_iterate = ids_to_iterate[:limit]
-
-        for redis_key in ids_to_iterate:
-            yield await cls.load(db, redis_key=redis_key)
+        async for x in cls.filter_by(db, order_by=order_by, limit=limit, offset=offset):
+            yield x
 
     @classmethod
-    async def _get_ids_filter_by(cls, db, **kwargs):
+    async def _get_ordered_result(cls, db, list_to_order, order_by, direction):
+        """
+
+        :param list_to_order:
+        :param order_by:
+        :param direction:
+        :return:
+
+        Sort the given list in redis.
+        https://redis.io/commands/sort#using-hashes-in-codebycode-and-codegetcode
+        """
+        pairs = []
+        for x in list_to_order:
+            pairs.extend([0, x])
+        if pairs:
+            ordered_res_key = 'filtered_result-{}'.format(uuid.uuid1())
+            await db.zadd(ordered_res_key, pairs[0], pairs[1], *pairs[2:])
+            ordered_result = await db.sort(
+                ordered_res_key,
+                by='{}:*->{}'.format(cls.__name__, order_by),
+                alpha=True,
+                asc=direction
+            )
+            # Delete the temp store
+            await db.delete(ordered_res_key)
+            return ordered_result
+        else:
+            return []
+
+    @classmethod
+    async def _get_ids_filter_by(cls, db, order_by=None, **kwargs):
+        if order_by:
+            direction = b'DESC' if order_by[0] == '-' else None
+            if order_by[0] in ('+', '-'):
+                order_by = order_by[1:]
+                if order_by not in cls._queryable_colnames_set:
+                    err_msg = 'order_by field {order_by} is not in {queryable_cols}'.format(
+                        order_by=order_by,
+                        queryable_cols=cls._queryable_colnames_set,
+                    )
+                    raise InvalidQuery(err_msg)
+
         missing_cols_set = set(kwargs.keys()) - cls._queryable_colnames_set
         if missing_cols_set:
             err_msg = '{missing_cols_set} not in {queryable_cols}'.format(
@@ -314,17 +317,38 @@ class RedisModel(object, metaclass=ModelMeta):
                 first_iteration = False
             else:
                 result_set = result_set.intersection(temp_set)
+        if not kwargs:
+            for index_entry in await db.zrange(cls.get_index_key(cls._identifier_column_names[0]), 0, -1):
+                result_set.add(index_entry.split(VALUE_ID_SEPARATOR)[-1])
+        if order_by:
+            return await cls._get_ordered_result(db, list_to_order=result_set, order_by=order_by, direction=direction)
+
         return sorted(result_set)
 
     @classmethod
-    async def filter_by(cls, db, **kwargs):
+    async def filter_by(cls, db, offset=None, limit=None, **kwargs):
         """Query by attributes iteratively. Ordering is not supported
         Example:
             User.get_by(db, age=[32, 54])
             User.get_by(db, age=23, name="guido")
 
         """
-        for key in await cls._get_ids_filter_by(db, **kwargs):
+        if limit and type(limit) is not int:
+            raise InvalidQuery('If limit is supplied it must be an int')
+        if offset and type(offset) is not int:
+            raise InvalidQuery('If offset is supplied it must be an int')
+
+        ids_to_iterate = await cls._get_ids_filter_by(db, **kwargs)
+        if offset:
+            # Using offset without order_by is pretty strange, but allowed
+            if limit:
+                ids_to_iterate = ids_to_iterate[offset:offset+limit]
+            else:
+                ids_to_iterate = ids_to_iterate[offset:]
+        elif limit:
+            ids_to_iterate = ids_to_iterate[:limit]
+
+        for key in ids_to_iterate:
             yield await cls.load(db, key)
 
     @classmethod
@@ -334,8 +358,8 @@ class RedisModel(object, metaclass=ModelMeta):
         WARNING: if there are more than 1 results in cls that satisfy the conditions in kwargs,
         only 1 random result will be returned
         """
-        for key in await cls._get_ids_filter_by(db, **kwargs):
-            return await cls.load(db, key)
+        async for obj in cls.filter_by(db, limit=1, **kwargs):
+            return obj
         return None
 
     @classmethod
