@@ -18,7 +18,7 @@ class Column(object):
         You can't have both a primary_key and composite_key in the same model.
         index is whether you want this column indexed or not for faster retrieval.
         """
-        if type not in (str, int):
+        if type not in (str, int, bytes):
             # TODO: support for other field types (datetime, uuid, etc)
             err_msg = 'Bad Field Type: {}'.format(type)
             raise InvalidColumnDefinition(err_msg)

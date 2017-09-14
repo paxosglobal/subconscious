@@ -234,6 +234,8 @@ class RedisModel(object, metaclass=ModelMeta):
                 column = getattr(cls, key, False)
                 if not column or (column.field_type == str):
                     kwargs[key] = value
+                elif column.field_type == bytes:
+                    kwargs[key] = column.field_type(value, 'utf-8')
                 else:
                     kwargs[key] = column.field_type(value)
             kwargs['loading'] = True

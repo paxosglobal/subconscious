@@ -14,6 +14,7 @@ class TestUser(RedisModel):
     age = Column(index=True, type=int,)
     locale = Column(index=True, type=int, required=False)
     status = Column(type=str, enum=StatusEnum)
+    data_blob = Column(type=bytes)
 
 
 class TestAll(BaseTestCase):
@@ -21,7 +22,7 @@ class TestAll(BaseTestCase):
     def setUp(self):
         super(TestAll, self).setUp()
         user_id = str(uuid1())
-        user = TestUser(id=user_id, name='Test name', age=100, status='active')
+        user = TestUser(id=user_id, name='Test name', age=100, status='active', data_blob=b'{\'foo\': \'bar\'}')
         ret = self.loop.run_until_complete(user.save(self.db))
         self.assertTrue(ret)
 
