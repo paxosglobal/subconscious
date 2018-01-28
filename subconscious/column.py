@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+from datetime import datetime
 from enum import EnumMeta
 
 
@@ -18,8 +19,8 @@ class Column(object):
         You can't have both a primary_key and composite_key in the same model.
         index is whether you want this column indexed or not for faster retrieval.
         """
-        if type not in (str, int):
-            # TODO: support for other field types (datetime, uuid, etc)
+        if type not in (str, int, datetime):
+            # TODO: support for other field types (uuid, etc)
             err_msg = 'Bad Field Type: {}'.format(type)
             raise InvalidColumnDefinition(err_msg)
 

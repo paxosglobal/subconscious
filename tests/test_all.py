@@ -1,5 +1,6 @@
 from subconscious.model import RedisModel, Column, InvalidQuery
 from uuid import uuid1
+from datetime import datetime
 from .base import BaseTestCase
 import enum
 
@@ -14,6 +15,7 @@ class TestUser(RedisModel):
     age = Column(index=True, type=int,)
     locale = Column(index=True, type=int, required=False)
     status = Column(type=str, enum=StatusEnum)
+    birth_date = Column(type=datetime, required=False)
 
 
 class TestAll(BaseTestCase):
@@ -26,7 +28,8 @@ class TestAll(BaseTestCase):
         self.assertTrue(ret)
 
         user_id = str(uuid1())
-        user1 = TestUser(id=user_id, name='ZTest name', age=53)
+        bdate = datetime(1854, 1, 6, 14, 35, 19)
+        user1 = TestUser(id=user_id, name='ZTest name', age=53, birth_date=bdate)
         ret = self.loop.run_until_complete(user1.save(self.db))
         self.assertTrue(ret)
 
@@ -41,6 +44,9 @@ class TestAll(BaseTestCase):
                 self.assertEqual(type(x), TestUser)
                 self.assertTrue(x.name in ('Test name', 'ZTest name', 'Test name2'))
                 self.assertTrue(x.age in (100, 53))
+                if x.name == 'ZTest name':
+                    bdate = datetime(1854, 1, 6, 14, 35, 19)
+                    self.assertEqual(x.birth_date, bdate)
         self.loop.run_until_complete(_test_all())
 
     def test_all_with_order(self):

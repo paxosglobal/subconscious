@@ -3,6 +3,7 @@
 import inspect
 import logging
 import uuid
+from datetime import datetime
 
 from .column import Column
 from .query import Query
@@ -12,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 VALUE_ID_SEPARATOR = '\x00'
 MODEL_NAME_ID_SEPARATOR = ':'
+DATETIME_FORMAT = '%Y-%m-%d %H:%M:%S.%f'
 
 
 # Exceptions
@@ -210,7 +212,11 @@ class RedisModel(object, metaclass=ModelMeta):
 
         # we have to delete the old index key
         stale_object = await self.__class__.load(db, identifier=self.identifier())
-        success = await db.hmset_dict(self.redis_key(), self.__dict__.copy())
+        d = {
+            k: (v.strftime(DATETIME_FORMAT) if isinstance(v, datetime) else v)
+            for k, v in self.__dict__.items()
+        }
+        success = await db.hmset_dict(self.redis_key(), d)
         await self.save_index(db, stale_object=stale_object)
         return success
 
@@ -234,6 +240,8 @@ class RedisModel(object, metaclass=ModelMeta):
                 column = getattr(cls, key, False)
                 if not column or (column.field_type == str):
                     kwargs[key] = value
+                elif column.field_type == datetime:
+                    kwargs[key] = datetime.strptime(value, DATETIME_FORMAT)
                 else:
                     kwargs[key] = column.field_type(value)
             kwargs['loading'] = True
@@ -304,6 +312,8 @@ class RedisModel(object, metaclass=ModelMeta):
                 v = cls._columns_map[k]
             if isinstance(v, (list, tuple)):
                 values = [str(x) for x in v]
+            elif isinstance(v, datetime):
+                values = (v.strftime(DATETIME_FORMAT),)
             else:
                 values = (str(v),)
             temp_set = set()
